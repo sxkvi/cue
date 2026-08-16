@@ -88,6 +88,16 @@ function formatProviderErrorMessage(error, provider, model) {
   return rawMessage || 'Unknown LLM error.';
 }
 
+// Every provider is consumed through `for await`, so honouring a cancellation
+// is the same move in all of them: stop pulling. Breaking out of the loop calls
+// the iterator's return(), which the OpenAI, Anthropic and Gemini SDKs wire to
+// aborting the underlying request — so this both stops the tokens reaching the
+// user and stops the provider billing for them. Providers whose request layer
+// takes a signal directly are also given one.
+function isAborted(signal) {
+  return !!(signal && signal.aborted);
+}
+
 function sanitizeTurns(turns) {
   const valid = new Set(['user', 'assistant']);
   return (turns || []).filter(t => valid.has(t.role)).map(t => ({ role: t.role, text: String(t.text || '') }));
@@ -105,7 +115,7 @@ function stripDataUrl(dataUrl) {
   return m ? { mime: m[1], b64: m[2] } : null;
 }
 
-async function streamOpenAI({ apiKey, baseURL, model, system, turns, imageDataUrl, maxTokens, onToken }) {
+async function streamOpenAI({ apiKey, baseURL, model, system, turns, imageDataUrl, maxTokens, onToken, abortSignal }) {
   const OpenAI = require('openai');
   const client = new OpenAI(baseURL ? { apiKey, baseURL } : { apiKey });
   const messages = [{ role: 'system', content: system }];
@@ -122,9 +132,10 @@ async function streamOpenAI({ apiKey, baseURL, model, system, turns, imageDataUr
       messages.push({ role: t.role, content: t.text });
     }
   });
-  const stream = await client.chat.completions.create({ model, messages, stream: true, max_tokens: maxTokens });
+  const stream = await client.chat.completions.create({ model, messages, stream: true, max_tokens: maxTokens }, { signal: abortSignal });
   let full = '';
   for await (const part of stream) {
+    if (isAborted(abortSignal)) break;
     const d = part.choices && part.choices[0] && part.choices[0].delta && part.choices[0].delta.content;
     if (d) { full += d; onToken(d); }
   }
@@ -142,7 +153,7 @@ function normalizeAzureBaseURL(raw) {
   return u;
 }
 
-async function streamAzure({ apiKey, model, system, turns, imageDataUrl, maxTokens, onToken, endpoint }) {
+async function streamAzure({ apiKey, model, system, turns, imageDataUrl, maxTokens, onToken, endpoint, abortSignal }) {
   const url = normalizeAzureBaseURL(endpoint);
   if (!url) throw new Error('Missing Azure endpoint. Add your Azure AI Foundry or Azure OpenAI endpoint in Settings.');
   const messages = [{ role: 'system', content: system }];
@@ -172,7 +183,7 @@ async function streamAzure({ apiKey, model, system, turns, imageDataUrl, maxToke
     };
     client = new OpenAI({ baseURL: url, apiKey, fetch: azureFetch });
   }
-  const stream = await client.chat.completions.create({ model, messages, stream: true, max_completion_tokens: maxTokens });
+  const stream = await client.chat.completions.create({ model, messages, stream: true, max_completion_tokens: maxTokens }, { signal: abortSignal });
   let full = '';
   for await (const part of stream) {
     const d = part.choices && part.choices[0] && part.choices[0].delta && part.choices[0].delta.content;
@@ -181,7 +192,7 @@ async function streamAzure({ apiKey, model, system, turns, imageDataUrl, maxToke
   return full;
 }
 
-async function streamAnthropic({ apiKey, model, system, turns, imageDataUrl, maxTokens, onToken }) {
+async function streamAnthropic({ apiKey, model, system, turns, imageDataUrl, maxTokens, onToken, abortSignal }) {
   const Anthropic = require('@anthropic-ai/sdk');
   const client = new Anthropic({ apiKey });
   const messages = turns.map((t, i) => {
@@ -195,15 +206,16 @@ async function streamAnthropic({ apiKey, model, system, turns, imageDataUrl, max
     }
     return { role: t.role, content: t.text };
   });
-  const stream = await client.messages.create({ model, max_tokens: maxTokens, system, messages, stream: true });
+  const stream = await client.messages.create({ model, max_tokens: maxTokens, system, messages, stream: true }, { signal: abortSignal });
   let full = '';
   for await (const ev of stream) {
+    if (isAborted(abortSignal)) break;
     if (ev.type === 'content_block_delta' && ev.delta && ev.delta.type === 'text_delta') { full += ev.delta.text; onToken(ev.delta.text); }
   }
   return full;
 }
 
-async function streamGemini({ apiKey, model, system, turns, imageDataUrl, maxTokens, onToken }) {
+async function streamGemini({ apiKey, model, system, turns, imageDataUrl, maxTokens, onToken, abortSignal }) {
   const { GoogleGenAI } = require('@google/genai');
   const ai = new GoogleGenAI({ apiKey });
   const contents = turns.map((t, i) => {
@@ -216,17 +228,18 @@ async function streamGemini({ apiKey, model, system, turns, imageDataUrl, maxTok
     return { role: t.role === 'assistant' ? 'model' : 'user', parts };
   });
   const stream = await ai.models.generateContentStream({
-    model, contents, config: { systemInstruction: system, maxOutputTokens: maxTokens }
+    model, contents, config: { systemInstruction: system, maxOutputTokens: maxTokens, abortSignal }
   });
   let full = '';
   for await (const chunk of stream) {
+    if (isAborted(abortSignal)) break;
     const t = chunk && chunk.text;
     if (t) { full += t; onToken(t); }
   }
   return full;
 }
 
-async function streamOllama({ apiKey, model, system, turns, imageDataUrl, maxTokens, onToken }) {
+async function streamOllama({ apiKey, model, system, turns, imageDataUrl, maxTokens, onToken, abortSignal }) {
   const baseUrl = apiKey || 'http://localhost:11434';
   const url = `${baseUrl.replace(/\/$/, '')}/api/chat`;
 
@@ -250,7 +263,8 @@ async function streamOllama({ apiKey, model, system, turns, imageDataUrl, maxTok
     response = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model, messages, stream: true })
+      body: JSON.stringify({ model, messages, stream: true }),
+      signal: abortSignal
     });
   } catch (err) {
     throw new Error(`Ollama fetch failed: ${err.message}. Is Ollama running at ${baseUrl}?`);
@@ -264,6 +278,7 @@ async function streamOllama({ apiKey, model, system, turns, imageDataUrl, maxTok
   let full = '';
   let buffer = '';
   for await (const chunk of response.body) {
+    if (isAborted(abortSignal)) break;
     buffer += decoder.decode(chunk, { stream: true });
     const lines = buffer.split('\n');
     buffer = lines.pop(); // keep incomplete line
@@ -351,6 +366,32 @@ function createLLM(settings) {
         throw new Error('unknown provider: ' + provider);
       } catch (error) {
         throw new Error(formatProviderErrorMessage(error, provider, model));
+      }
+    },
+
+    // A one-word round trip, so the settings screen can say whether a key
+    // works at the moment it is pasted rather than at the moment it is needed.
+    // Timing it out matters as much as running it: a wrong endpoint typically
+    // hangs rather than refusing, and a spinner with no end is a worse answer
+    // than "failed".
+    async probe({ timeoutMs = 15000 } = {}) {
+      if (!ready) throw new Error(configurationError || `Complete the ${provider} provider settings.`);
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), timeoutMs);
+      const startedAt = Date.now();
+      try {
+        let text = '';
+        await this.stream({
+          system: 'Reply with the single word OK and nothing else.',
+          turns: [{ role: 'user', text: 'Say OK.' }],
+          maxTokens: 8,
+          abortSignal: controller.signal,
+          onToken: (token) => { text += token; }
+        });
+        if (controller.signal.aborted) throw new Error(`No response within ${Math.round(timeoutMs / 1000)}s.`);
+        return { ok: true, ms: Date.now() - startedAt, model, sample: text.trim().slice(0, 40) };
+      } finally {
+        clearTimeout(timer);
       }
     }
   };

@@ -23,8 +23,23 @@ function applyRules(prompt, aiRules, mode) {
   return appendAiRules(prompt, aiRules);
 }
 
-const BASE_RULES =
-  'Always respond in clear, natural English. Never switch to Hindi or any other language unless the user explicitly asks for it. ';
+// The interface can run in any supported language, so pinning answers to
+// English made a French user read the interface in French and the answers in
+// English. The language is now passed in, and the instruction still forbids
+// drifting to a language nobody asked for.
+const LANGUAGE_NAMES = {
+  en: 'English',
+  fr: 'French'
+};
+
+function languageName(language) {
+  return LANGUAGE_NAMES[String(language || '').toLowerCase()] || LANGUAGE_NAMES.en;
+}
+
+function baseRules(language) {
+  const name = languageName(language);
+  return `Always respond in clear, natural ${name}. Do not switch to another language unless the user explicitly asks for it. `;
+}
 
 const MODES = {
 
@@ -34,10 +49,10 @@ const MODES = {
     userBubble: null,
     small: false,
     resumeMode: 'assist',
-    buildSystem(contextBlock, aiRules) {
+    buildSystem(contextBlock, aiRules, language) {
       return applyRules(buildSystem(
         'You are cue, a discreet real-time copilot overlaid on the user\'s screen during an interview or coding session. ' +
-        BASE_RULES +
+        baseRules(language) +
         'Look at the screenshot and the recent conversation, decide what the user needs RIGHT NOW, and deliver it directly with no preamble.\n\n' +
         'Detect the question type and respond accordingly:\n' +
         '• BEHAVIORAL ("tell me about a time…"): Give a complete STAR answer (Situation, Task, Action, Result) using the candidate\'s real stories when available. Be specific, include metrics, 3–4 sentences.\n' +
@@ -63,10 +78,10 @@ const MODES = {
     userBubble: 'What should I say?',
     small: false,
     resumeMode: 'say',
-    buildSystem(contextBlock, aiRules) {
+    buildSystem(contextBlock, aiRules, language) {
       return applyRules(buildSystem(
         'You are cue, whispering the perfect reply to the candidate during a live interview. ' +
-        BASE_RULES +
+        baseRules(language) +
         '"Them" is the interviewer; "You" is the candidate.\n\n' +
         'Draft ONE natural, confident reply the candidate can say out loud, in first person.\n\n' +
         'Rules by question type:\n' +
@@ -93,7 +108,7 @@ const MODES = {
     userBubble: 'Follow-up questions',
     small: true,
     resumeMode: 'followup',
-    buildSystem(contextBlock, aiRules) {
+    buildSystem(contextBlock, aiRules, language) {
       return applyRules(buildSystem(
         'You are cue. Suggest 2–4 sharp follow-up questions the candidate could ask the interviewer.\n' +
         'Base them on what was discussed and the candidate\'s background/target role.\n' +
@@ -114,7 +129,7 @@ const MODES = {
     userBubble: 'Recap',
     small: true,
     resumeMode: 'recap',
-    buildSystem(contextBlock, aiRules) {
+    buildSystem(contextBlock, aiRules, language) {
       return applyRules(buildSystem(
         'You are cue. Summarize the interview so far:\n' +
         '• Topics covered\n• Questions asked\n• Key answers given\n• Any red flags or areas to strengthen\n' +
@@ -134,10 +149,10 @@ const MODES = {
     userBubble: null,
     small: false,
     resumeMode: 'ask',
-    buildSystem(contextBlock, aiRules) {
+    buildSystem(contextBlock, aiRules, language) {
       return applyRules(buildSystem(
         'You are cue, a real-time copilot with access to the candidate\'s screen and live interview. ' +
-        BASE_RULES +
+        baseRules(language) +
         'Answer the question directly and concisely. ' +
         'When the question is about the candidate\'s background, use their actual experience. ' +
         'When the question is conceptual, explain clearly with examples. No preamble.',
@@ -156,10 +171,10 @@ const MODES = {
     userBubble: null,   // bubble set dynamically from the question text
     small: false,
     resumeMode: 'say',  // same context budget as 'say'
-    buildSystem(contextBlock, aiRules) {
+    buildSystem(contextBlock, aiRules, language) {
       return applyRules(buildSystem(
         'You are cue, whispering a direct answer to the candidate for ONE specific question. ' +
-        BASE_RULES +
+        baseRules(language) +
         'The interviewer\'s exact question is provided below. Focus ONLY on answering that question — ignore any other conversation context.\n\n' +
         'Rules:\n' +
         '• BEHAVIORAL ("tell me about a time…"): STAR format using real stories from the candidate\'s background. Situation → Task → Action → Result. Include metrics if available.\n' +
@@ -178,16 +193,42 @@ const MODES = {
     }
   },
 
+  // ── Refine: rework the answer already on screen ───────────────────────────
+  // "Shorter" and "More detail" used to mean retyping the question and hoping.
+  // The previous answer is passed back in so the model edits rather than
+  // starts over, which is both faster and keeps the wording the user liked.
+  refine: {
+    needsScreen: false,
+    userBubble: null,
+    small: false,
+    resumeMode: 'say',
+    buildSystem(contextBlock, aiRules, language) {
+      return applyRules(buildSystem(
+        'You are cue. Rewrite the previous answer exactly as instructed. ' +
+        baseRules(language) +
+        'Keep the meaning, the facts and the first-person voice. Change only what the instruction asks for. ' +
+        'Return the rewritten answer alone — no preamble, no commentary on what you changed.',
+        contextBlock
+      ), aiRules, 'refine');
+    },
+    build(ctx) {
+      return 'Previous answer:\n\n' + (ctx.previousAnswer || '(none)') +
+        '\n\nInstruction: ' + (ctx.userText || 'rewrite it') +
+        '\n\nRewritten answer:';
+    }
+  },
+
   // ── LeetCode: pure coding solver — no personal context, no AI rules ─────
   leetcode: {
     needsScreen: true,
     userBubble: 'Solve what\'s on screen',
     small: false,
     resumeMode: 'leetcode',
-    buildSystem(_contextBlock, _aiRules) {
+    buildSystem(_contextBlock, _aiRules, language) {
       // Context block AND aiRules intentionally ignored — code answers must
       // stay strict regardless of personal style or context.
       return 'You are an expert competitive programmer. The screenshot contains a coding problem. ' +
+        `Write your prose in ${languageName(language)}; keep all code, identifiers and complexity notation as-is. ` +
         'Respond with: (1) a one-line restatement, (2) a short approach, (3) a clean, correct, idiomatic solution in a fenced code block ' +
         '(use the language shown on screen, else Python), (4) time and space complexity. Keep prose tight.';
     },
@@ -195,4 +236,4 @@ const MODES = {
   }
 };
 
-module.exports = { MODES, formatTranscript };
+module.exports = { MODES, formatTranscript, languageName, LANGUAGE_NAMES };

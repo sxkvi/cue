@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, globalShortcut, screen, session, desktopCapturer, shell, dialog, systemPreferences } = require('electron');
+const { app, BrowserWindow, ipcMain, globalShortcut, screen, session, desktopCapturer, shell, dialog, systemPreferences, Tray, Menu, nativeImage } = require('electron');
 const path = require('path');
 const os = require('os');
 const store = require('./src/store');
@@ -31,7 +31,7 @@ let win = null;
 // false when another application already owns the combination, and nothing used
 // to look at that — so the only symptom was a key that did nothing. Iris reads
 // this and can say which key is taken instead of guessing from a screenshot.
-const shortcutState = { assist: false, say: false, leetcode: false, quit: false };
+const shortcutState = { assist: false, say: false, leetcode: false, hide: false, quit: false };
 const isMac = process.platform === 'darwin';
 const isWindows = process.platform === 'win32';
 
@@ -47,6 +47,14 @@ const WIN_BUILD = getWindowsBuild();
 const WIN_SUPPORTS_CONTENT_PROTECTION = !isWindows || WIN_BUILD >= 19041;
 
 let permWin = null;
+let tray = null;
+// The in-flight answer, so it can be cancelled. Before this the only way out of
+// a long or wrong answer was to wait for it.
+let activeAbort = null;
+// What produced the answer currently on screen, so "try again", "shorter" and
+// "more detail" have something to work from.
+let lastRun = null;      // { mode, userText }
+let lastAnswer = '';
 
 // -------- capture / transcript state --------
 const state = { capturing: false, busy: false, transcribing: { you: false, them: false } };
@@ -96,6 +104,25 @@ function pushTranscript(turn) {
 }
 
 function send(channel, data) { if (win && !win.isDestroyed()) win.webContents.send(channel, data); }
+
+// Status text is picked in the renderer so it can be shown in the user's own
+// language. Main sends a key and the values to interpolate into it, never
+// English prose — a translated interface reporting untranslated errors was one
+// of the more jarring things about the old build.
+function sendStatus(key, vars) { send('status', { key, vars: vars || {} }); }
+
+// 'auto' means the system language; 'ui' means whatever the interface is set
+// to. Resolving both here keeps the renderer and the prompts in agreement
+// about which language an answer should come back in.
+function resolveUiLanguage(settings) {
+  const preference = settings.language || 'auto';
+  const tag = preference === 'auto' ? app.getLocale() : preference;
+  return String(tag || 'en').split('-')[0].toLowerCase();
+}
+function resolveAnswerLanguage(settings) {
+  const preference = settings.answerLanguage || 'ui';
+  return preference === 'ui' ? resolveUiLanguage(settings) : String(preference).toLowerCase();
+}
 
 function getWhisperRuntime() {
   return locateWhisperRuntime({
@@ -150,7 +177,7 @@ async function startLocalWhisper(settings) {
         sttDisabled = true;
         console.log('[local-whisper] error', error && error.message);
         send('stt:status', { provider: 'local', status: 'error' });
-        send('status', { message: `Local transcription error: ${error.message}. Audio was not sent to a cloud fallback.` });
+        sendStatus('err.local.error', { message: error.message });
       }
     });
 
@@ -254,16 +281,14 @@ function createWindow() {
     }, 500);
   });
 
-  win.setTitle('Microsoft Edge Update'); // set before load
+  applyDisguise(store.getSettings()); // set before load
 
   win.webContents.on('did-finish-load', () => {
     win.showInactive();
-    win.setTitle('Microsoft Edge Update');
+    applyDisguise(store.getSettings());
     // Warn about missing content protection on old Windows builds
     if (isWindows && shouldProtect && !WIN_SUPPORTS_CONTENT_PROTECTION) {
-      send('status', {
-        message: `Heads up: your Windows version (build ${WIN_BUILD}) does not support screen-share hiding. Upgrade to Windows 10 build 19041+ or Windows 11 to enable invisibility in screen shares.`
-      });
+      sendStatus('err.contentProtection', { build: WIN_BUILD });
     }
   });
   win.webContents.on('render-process-gone', (_e, d) => {
@@ -287,7 +312,7 @@ async function flushChannel(channel) {
     const settings = store.getSettings();
     const stt = createSTT(settings);
     if (!stt.available) {
-      if (!sttDisabled) { sttDisabled = true; send('status', { message: 'No transcription key set. Add an OpenAI (Whisper), Deepgram, or Gemini key in Settings to enable listening. Screen/LeetCode features work without it.' }); }
+      if (!sttDisabled) { sttDisabled = true; sendStatus('err.nostt'); }
       return;
     }
     const res = await stt.transcribe(pcm);
@@ -325,9 +350,9 @@ function handleSttError(err, settings) {
   const noAccess = err.status === 403 || err.status === 401 || err.code === 'model_not_found' || isQuota;
   sttDisabled = true; // stop hammering the API every few seconds
   if (noAccess) {
-    send('status', { message: `Transcription off: your ${err.provider} key was rejected or hit a quota limit. Update your key in Settings to resume.` });
+    sendStatus('err.stt.rejected', { provider: err.provider });
   } else {
-    send('status', { message: 'Transcription error (' + err.provider + '): ' + err.message });
+    sendStatus('err.stt.generic', { provider: err.provider, message: err.message });
   }
 }
 
@@ -358,11 +383,11 @@ function initStreamingSTT() {
         const batchFallbackAvailable = createSTT(settings).available;
         stopStreamingSTT(); // close WebSockets and clear keep-alive intervals
         if (batchFallbackAvailable) {
-          send('status', { message: `Streaming transcription (${err.provider}) error: ${err.message}. Falling back to batch mode.` });
+          sendStatus('err.stt.fallback', { provider: err.provider });
           startFlushLoop();
         } else if (!sttDisabled) {
           sttDisabled = true;
-          send('status', { message: `Transcription stopped (${err.provider}): ${err.message}. The selected provider has no batch fallback.` });
+          sendStatus('err.stt.generic', { provider: err.provider, message: err.message });
         }
         streamingMode = false;
       },
@@ -444,7 +469,7 @@ async function setCapturing(active) {
           return false;
         }
         send('stt:status', { provider: 'local', status: 'error' });
-        send('status', { message: `Local transcription could not start: ${error.message} No audio was sent to a cloud provider.` });
+        sendStatus('err.local.failed', { message: error.message });
         send('capture:state', { active: false, streaming: false, mode: 'local' });
         return false;
       }
@@ -457,6 +482,7 @@ async function setCapturing(active) {
       startFlushLoop();
     }
     console.log('[cue] capture started, mode:', streaming ? 'streaming' : 'batch');
+    refreshTray();
     send('capture:state', { active: true, streaming: streamingMode, mode: streaming ? 'streaming' : 'batch' });
     return true;
   }
@@ -469,6 +495,7 @@ async function setCapturing(active) {
   ringBuffers.you.clear(); ringBuffers.them.clear();
   const stoppingLocalTranscriber = localWhisperTranscriber;
   localWhisperTranscriber = null;
+  refreshTray();
   send('capture:state', { active: false, streaming: false, mode: stoppingLocalTranscriber ? 'local' : 'off' });
   if (stoppingLocalTranscriber) {
     send('stt:status', { provider: 'local', status: 'stopping' });
@@ -484,12 +511,15 @@ async function setCapturing(active) {
 }
 
 // -------- feature runner --------
-async function runFeature(mode, userText) {
+async function runFeature(mode, userText, options = {}) {
   if (state.busy) return;
   const def = MODES[mode];
   if (!def) return;
   state.busy = true;
   let streamSettled = false; // drop stray tokens from a stream we've already abandoned
+  const abort = new AbortController();
+  activeAbort = abort;
+  let answer = '';
   try {
     const settings = store.getSettings();
     const llm = createLLM(settings);
@@ -513,19 +543,25 @@ async function runFeature(mode, userText) {
       }
       catch (e) {
         recordEvent({ level: 'error', event: 'screen_capture_failed', msg: e && e.message ? e.message : String(e), frame: 'captureScreenshot', context: { mode } });
-        const message = process.platform === 'darwin'
-          ? 'Screen capture needs permission — grant Screen Recording to cue in System Settings.'
+        sendStatus(process.platform === 'darwin'
+          ? 'err.screen.mac'
           : process.platform === 'win32'
-            ? 'Screen capture failed. Make sure cue is not blocked by Windows privacy or security software, then try again.'
-            : 'Screen capture failed. Check your desktop capture permissions, then try again.';
-        send('status', { message });
+            ? 'err.screen.win'
+            : 'err.screen.generic');
       }
     }
 
     const settingsForPrompt = store.getSettings();
     const contextBlock = buildInterviewContext(settingsForPrompt, mode, transcript);
-    const system = def.buildSystem ? def.buildSystem(contextBlock, settingsForPrompt.aiRules || '') : (def.system || '');
-    const built = def.build({ transcript, userText: userText || '' });
+    const answerLanguage = resolveAnswerLanguage(settingsForPrompt);
+    const system = def.buildSystem
+      ? def.buildSystem(contextBlock, settingsForPrompt.aiRules || '', answerLanguage)
+      : (def.system || '');
+    const built = def.build({
+      transcript,
+      userText: userText || '',
+      previousAnswer: options.previousAnswer || ''
+    });
 
     // Watchdog: a provider that stalls mid-stream would otherwise hang the await forever,
     // leaving state.busy = true and wedging every later question until an app restart.
@@ -544,7 +580,13 @@ async function runFeature(mode, userText) {
           system,
           turns: [{ role: 'user', text: built }],
           imageDataUrl,
-          onToken: (t) => { if (streamSettled) return; rearm(); send('llm:token', { text: t }); }
+          abortSignal: abort.signal,
+          onToken: (t) => {
+            if (streamSettled) return;
+            rearm();
+            answer += t;
+            send('llm:token', { text: t });
+          }
         }),
         stalled
       ]);
@@ -552,19 +594,142 @@ async function runFeature(mode, userText) {
       streamSettled = true;
       clearTimeout(watchdog);
     }
-    send('llm:done', {});
+    // Only a real answer is worth keeping: refining an empty or cancelled one
+    // would send the model a prompt asking it to rewrite nothing.
+    if (!abort.signal.aborted && answer.trim()) {
+      lastAnswer = answer;
+      if (mode !== 'refine') lastRun = { mode, userText: userText || '' };
+    }
+    send('llm:done', { stopped: abort.signal.aborted });
   } catch (e) {
-    recordEvent({ level: 'error', event: 'llm_failed', msg: e && e.message ? e.message : String(e), frame: 'runFeature', context: { mode, provider: store.getSettings().provider } });
-    send('llm:error', { message: e && e.message ? e.message : String(e) });
+    if (abort.signal.aborted) {
+      // Cancelling is a normal outcome, not a failure — nothing to report.
+      send('llm:done', { stopped: true });
+    } else {
+      recordEvent({ level: 'error', event: 'llm_failed', msg: e && e.message ? e.message : String(e), frame: 'runFeature', context: { mode, provider: store.getSettings().provider } });
+      send('llm:error', { message: e && e.message ? e.message : String(e) });
+    }
   } finally {
     streamSettled = true;
     state.busy = false;
+    if (activeAbort === abort) activeAbort = null;
+  }
+}
+
+// -------- menu-bar presence --------
+// Without this, a hidden overlay whose show shortcut is owned by another
+// application is unreachable: no dock icon, no taskbar entry, nothing to click.
+// The tray is the way back in, and the one place quitting is always possible.
+const TRAY_STRINGS = {
+  en: {
+    show: 'Show cue', hide: 'Hide cue',
+    listen: 'Start listening', stopListening: 'Stop listening',
+    settings: 'Settings…', export: 'Export conversation…',
+    guide: 'Open the guide', quit: 'Quit cue'
+  },
+  fr: {
+    show: 'Afficher cue', hide: 'Masquer cue',
+    listen: 'Commencer à écouter', stopListening: 'Arrêter d’écouter',
+    settings: 'Réglages…', export: 'Exporter la conversation…',
+    guide: 'Ouvrir le guide', quit: 'Quitter cue'
+  }
+};
+function trayStrings() {
+  return TRAY_STRINGS[resolveUiLanguage(store.getSettings())] || TRAY_STRINGS.en;
+}
+
+let panelHidden = false;
+
+function buildTrayMenu() {
+  const t = trayStrings();
+  return Menu.buildFromTemplate([
+    {
+      label: panelHidden ? t.show : t.hide,
+      click: () => { panelHidden = !panelHidden; send('hide:toggle', { hidden: panelHidden }); refreshTray(); }
+    },
+    {
+      label: state.capturing ? t.stopListening : t.listen,
+      click: () => { send('capture:request-toggle', {}); }
+    },
+    { type: 'separator' },
+    { label: t.guide, click: () => send('onboard:show', {}) },
+    { label: t.settings, click: () => send('settings:show', {}) },
+    { label: t.export, enabled: transcript.length > 0, click: () => exportTranscript() },
+    { type: 'separator' },
+    { label: t.quit, click: () => requestQuit() }
+  ]);
+}
+
+function refreshTray() {
+  if (!tray || tray.isDestroyed()) return;
+  tray.setContextMenu(buildTrayMenu());
+  tray.setToolTip(state.capturing ? 'cue — ' + trayStrings().stopListening : 'cue');
+}
+
+function createTray() {
+  if (tray) return;
+  const image = nativeImage.createFromPath(path.join(__dirname, 'src', 'assets', 'trayTemplate.png'));
+  if (image.isEmpty()) {
+    console.log('[cue] tray icon missing — menu-bar entry not created');
+    return;
+  }
+  image.setTemplateImage(true);
+  tray = new Tray(image);
+  refreshTray();
+}
+
+// -------- quitting --------
+// Quitting throws away everything cue has heard, and the quit shortcut sits one
+// key away from the hide shortcut, so it asks first unless told not to.
+function requestQuit() {
+  const settings = store.getSettings();
+  if (settings.confirmQuit && win && !win.isDestroyed()) {
+    send('app:confirm-quit', {});
+    return;
+  }
+  app.quit();
+}
+
+// -------- transcript export --------
+function transcriptAsMarkdown() {
+  const stamp = new Date().toISOString().slice(0, 16).replace('T', ' ');
+  const lines = ['# cue — conversation', '', '_' + stamp + '_', ''];
+  for (const turn of transcript) {
+    const time = new Date(turn.ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    lines.push('**' + (turn.channel === 'them' ? 'Them' : 'You') + '** _(' + time + ')_  ');
+    lines.push(turn.text, '');
+  }
+  return lines.join('\n');
+}
+
+async function exportTranscript() {
+  if (!transcript.length) return { cancelled: true, empty: true };
+  const suggested = 'cue-conversation-' + new Date().toISOString().slice(0, 10) + '.md';
+  const result = await dialog.showSaveDialog(win && !win.isDestroyed() ? win : undefined, {
+    defaultPath: path.join(app.getPath('documents'), suggested),
+    filters: [{ name: 'Markdown', extensions: ['md'] }, { name: 'Text', extensions: ['txt'] }]
+  });
+  if (result.canceled || !result.filePath) return { cancelled: true };
+  try {
+    require('fs').writeFileSync(result.filePath, transcriptAsMarkdown(), 'utf8');
+    return { cancelled: false, filePath: result.filePath, fileName: path.basename(result.filePath) };
+  } catch (error) {
+    return { cancelled: false, error: error.message };
   }
 }
 
 // -------- IPC --------
 ipcMain.handle('settings:get', () => store.getSettings());
-ipcMain.handle('settings:set', (_e, patch) => { sttDisabled = false; return store.setSettings(patch); });
+ipcMain.handle('settings:set', (_e, patch) => {
+  sttDisabled = false;
+  const next = store.setSettings(patch);
+  // Shortcuts and the process disguise live in the main process, so a settings
+  // write has to be applied here as well as stored.
+  if (patch && patch.shortcuts) registerShortcuts();
+  if (patch && Object.prototype.hasOwnProperty.call(patch, 'disguiseProcess')) applyDisguise(next);
+  refreshTray();
+  return next;
+});
 ipcMain.handle('capture:toggle', () => {
   const targetState = !desiredCaptureState;
   desiredCaptureState = targetState;
@@ -616,13 +781,75 @@ ipcMain.handle('whisper:model-import', async (_event, modelId) => {
 ipcMain.handle('platform:info', () => ({
   platform: process.platform,
   winBuild: WIN_BUILD,
-  winSupportsContentProtection: WIN_SUPPORTS_CONTENT_PROTECTION
+  winSupportsContentProtection: WIN_SUPPORTS_CONTENT_PROTECTION,
+  // The renderer picks the interface language from this when the setting is
+  // 'auto'; navigator.language inside Electron does not always match the OS.
+  systemLocale: app.getLocale(),
+  shortcuts: shortcutSnapshot()
 }));
 ipcMain.handle('transcript:clear', () => {
   transcript.splice(0, transcript.length);
   return { ok: true };
 });
 ipcMain.on('ask', (_e, payload) => runFeature(payload.mode, payload.text));
+ipcMain.on('llm:stop', () => { if (activeAbort) activeAbort.abort(); });
+// "Try again", "shorter" and "more detail" used to mean retyping the question.
+// The instructions are written in English on purpose: they steer the edit, while
+// the system prompt decides which language the answer comes back in.
+const REFINE_INSTRUCTIONS = {
+  shorter: 'Make it about half as long. Keep only the strongest points and drop everything else.',
+  longer: 'Add more detail: concrete specifics, a short example, and the reasoning behind it.'
+};
+ipcMain.on('llm:refine', (_e, payload) => {
+  const kind = payload && payload.kind;
+  if (kind === 'retry') {
+    if (lastRun) runFeature(lastRun.mode, lastRun.userText);
+    return;
+  }
+  const instruction = REFINE_INSTRUCTIONS[kind];
+  if (!instruction || !lastAnswer) return;
+  runFeature('refine', instruction, { previousAnswer: lastAnswer });
+});
+
+// Answers whether a key actually works, at the moment it is pasted rather than
+// at the moment it is needed. Takes the unsaved settings so the user does not
+// have to commit a key to find out it is wrong.
+ipcMain.handle('provider:test', async (_e, patch) => {
+  const base = store.getSettings();
+  const incoming = patch || {};
+  const merged = {
+    ...base,
+    ...incoming,
+    apiKeys: { ...base.apiKeys, ...(incoming.apiKeys || {}) },
+    models: { ...base.models, ...(incoming.models || {}) }
+  };
+  const llm = createLLM(merged);
+  if (!llm.ready) return { ok: false, message: llm.configurationError || 'Provider settings are incomplete.' };
+  try { return await llm.probe(); }
+  catch (error) { return { ok: false, message: (error && error.message) || String(error) }; }
+});
+
+ipcMain.handle('transcript:export', () => exportTranscript());
+
+// Moving a frameless overlay used to need a mouse on one small drag handle.
+ipcMain.on('window:nudge', (_e, delta) => {
+  if (!win || win.isDestroyed()) return;
+  const { workArea } = screen.getDisplayMatching(win.getBounds());
+  const [x, y] = win.getPosition();
+  const [w, h] = win.getSize();
+  const step = Number(delta && delta.step) || 24;
+  const nextX = Math.round(x + (Number(delta && delta.dx) || 0) * step);
+  const nextY = Math.round(y + (Number(delta && delta.dy) || 0) * step);
+  // Keep a strip of the window on screen so it can always be dragged back.
+  const margin = 80;
+  win.setPosition(
+    Math.max(workArea.x - w + margin, Math.min(nextX, workArea.x + workArea.width - margin)),
+    Math.max(workArea.y, Math.min(nextY, workArea.y + workArea.height - 40))
+  );
+});
+
+ipcMain.handle('shortcuts:state', () => shortcutSnapshot());
+ipcMain.on('app:request-quit', () => requestQuit());
 ipcMain.on('mic:pcm', (_e, arrayBuffer) => { if (state.capturing) routeAudio('you', arrayBuffer); });
 ipcMain.on('system:pcm', (_e, arrayBuffer) => { if (state.capturing) routeAudio('them', arrayBuffer); });
 ipcMain.on('mouse:ignore', (_e, v) => { if (win) win.setIgnoreMouseEvents(!!v, { forward: true }); });
@@ -652,7 +879,6 @@ ipcMain.handle('profile:pickDocument', async () => {
     return { canceled: false, error: (e && e.message) || String(e) };
   }
 });
-ipcMain.on('app:quit', () => app.quit());
 ipcMain.handle('applink:state', () => appLinkConsentState());
 ipcMain.handle('applink:revoke', (_e, callerId) => revokeAppLinkCaller(callerId));
 
@@ -668,17 +894,58 @@ ipcMain.on('permissions:continue', async () => {
 });
 
 // -------- shortcuts --------
+// globalShortcut.register returns false when another application already owns a
+// combination. That used to be recorded and then ignored, so the only symptom
+// was a key that quietly did nothing. The result is now reported to the
+// renderer, which says which key is taken, and every combination is stored in
+// settings so the user can pick a different one instead of being stuck.
+const SHORTCUT_ACTIONS = {
+  assist: () => runFeature('assist', ''),
+  say: () => runFeature('say', ''),
+  leetcode: () => runFeature('leetcode', ''),
+  hide: () => { panelHidden = !panelHidden; send('hide:toggle', { hidden: panelHidden }); refreshTray(); },
+  quit: () => requestQuit()
+};
+
+function currentShortcuts() {
+  return { ...store.getSettings().shortcuts };
+}
+
+function shortcutSnapshot() {
+  return { registered: { ...shortcutState }, combos: currentShortcuts() };
+}
+
 function registerShortcuts() {
-  shortcutState.assist = globalShortcut.register('CommandOrControl+Return', () => runFeature('assist', ''));
-  shortcutState.say = globalShortcut.register('CommandOrControl+Shift+Return', () => runFeature('say', ''));
-  shortcutState.leetcode = globalShortcut.register('CommandOrControl+H', () => runFeature('leetcode', ''));
-  shortcutState.hide = globalShortcut.register('CommandOrControl+Shift+/', () => send('hide:toggle', {}));
-  shortcutState.quit = globalShortcut.register('CommandOrControl+Shift+X', () => app.quit());
-  for (const [name, wasRegistered] of Object.entries(shortcutState)) {
-    if (!wasRegistered) {
-      recordEvent({ level: 'warn', event: 'shortcut_unavailable', msg: 'another application holds the ' + name + ' shortcut', frame: 'registerShortcuts', context: { shortcut: name } });
+  globalShortcut.unregisterAll();
+  const combos = currentShortcuts();
+  for (const [name, action] of Object.entries(SHORTCUT_ACTIONS)) {
+    const accelerator = combos[name];
+    shortcutState[name] = false;
+    if (!accelerator) continue;
+    // An accelerator the user typed can be syntactically invalid, and Electron
+    // throws rather than returning false for those.
+    try { shortcutState[name] = globalShortcut.register(accelerator, action); }
+    catch (_) { shortcutState[name] = false; }
+    if (!shortcutState[name]) {
+      recordEvent({
+        level: 'warn', event: 'shortcut_unavailable',
+        msg: 'the ' + name + ' shortcut (' + accelerator + ') could not be registered',
+        frame: 'registerShortcuts', context: { shortcut: name, accelerator }
+      });
     }
   }
+  send('shortcuts:state', shortcutSnapshot());
+}
+
+// The disguise is deliberate — cue reports itself as a background updater so it
+// is not obvious in a process list — but it also means a user who wants to find
+// their own app cannot. It is now a setting rather than a fact of the build.
+const DISGUISE_NAME = 'Microsoft Edge Update';
+function applyDisguise(settings) {
+  const disguised = settings.disguiseProcess !== false;
+  app.setName(disguised ? 'MicrosoftEdgeUpdate' : 'cue');
+  if (isWindows) process.title = disguised ? 'MicrosoftEdgeUpdate' : 'cue';
+  if (win && !win.isDestroyed()) win.setTitle(disguised ? DISGUISE_NAME : 'cue');
 }
 
 // -------- permissions --------
@@ -801,14 +1068,12 @@ function launchApp() {
 
   createWindow();
   registerShortcuts();
+  createTray();
 }
 
 // -------- lifecycle --------
 app.whenReady().then(async () => {
-  app.setName('MicrosoftEdgeUpdate');
-  if (isWindows) {
-    process.title = 'MicrosoftEdgeUpdate';
-  }
+  applyDisguise(store.getSettings());
 
   if (isMac) {
     const allGranted = await requestPermissions();
@@ -826,6 +1091,7 @@ app.whenReady().then(async () => {
 
 app.on('will-quit', () => {
   globalShortcut.unregisterAll();
+  if (tray && !tray.isDestroyed()) { tray.destroy(); tray = null; }
   // Best effort, deliberately not blocking the quit: the library also removes
   // the instance file from a `process.on('exit')` handler, and a file left
   // behind is harmless anyway because readers check whether the PID is alive.
@@ -836,9 +1102,6 @@ app.on('will-quit', () => {
   }
   if (localWhisperTranscriber) localWhisperTranscriber.forceStop().catch(() => {});
 });
-app.on('window-all-closed', () => app.quit());
-
-app.on('will-quit', () => { globalShortcut.unregisterAll(); });
 app.on('window-all-closed', (e) => {
   // Don't quit while the permissions window is open — the user may be in System Settings
   if (permWin) { e.preventDefault(); return; }
