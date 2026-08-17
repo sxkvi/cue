@@ -19,6 +19,35 @@
 // the leaf certificate, and signing with an incomplete chain fails in a way
 // that looks like a wrong password.
 const hasCert = process.env.MAC_SIGN === "1";
+
+// A locally built app still needs a stable identity, because macOS keys
+// permissions to the code signature. Unsigned, the designated requirement is a
+// bare hash of the binary, so every rebuild looks like a different application
+// and Screen Recording has to be granted again — and the app never appears in
+// that list to begin with. Signing with any real certificate, including a
+// self-signed one, makes the requirement name the certificate instead, and the
+// grant survives every rebuild.
+//
+// scripts/make-signing-cert.sh creates the certificate this looks for.
+const LOCAL_IDENTITY = process.env.VOICEGOAT_SIGN_IDENTITY || "voicegoat local signing";
+
+function localIdentityAvailable() {
+  if (process.platform !== "darwin") return false;
+  try {
+    const { execFileSync } = require("child_process");
+    const found = execFileSync("security", ["find-identity", "-v", "-p", "codesigning"], {
+      encoding: "utf8",
+    });
+    return found.includes(LOCAL_IDENTITY);
+  } catch (_) {
+    return false;
+  }
+}
+
+const localIdentity = !hasCert && localIdentityAvailable();
+if (localIdentity) {
+  console.log(`[voicegoat] signing with the local certificate "${LOCAL_IDENTITY}"`);
+}
 const canNotarize =
   hasCert &&
   !!process.env.APPLE_ID &&
@@ -45,7 +74,7 @@ module.exports = {
     // With a real cert, let electron-builder discover it and apply the hardened
     // runtime (notarization is refused without it). Without one, identity:null
     // makes it skip signing rather than fail.
-    identity: hasCert ? undefined : null,
+    identity: hasCert ? undefined : localIdentity ? LOCAL_IDENTITY : null,
     hardenedRuntime: hasCert,
     gatekeeperAssess: false,
     entitlements: "build-resources/entitlements.mac.plist",
