@@ -33,6 +33,37 @@ function resolveBinary() {
   return 'claude';
 }
 
+// ---- handing a screenshot over safely ----------------------------------
+// The CLI takes a text prompt, so an image has to reach it as a file. That file
+// is a picture of the user's screen mid-interview — their resume, the
+// conversation, whatever else is open — and the first version of this wrote it
+// into the shared temp directory under a name built from the process id and the
+// clock, with whatever permissions the umask allowed. On Linux that is a
+// world-readable file in a world-writable directory, at a path another process
+// can predict or simply watch for; a symlink planted at that path beforehand
+// would also have redirected the write.
+//
+// mkdtemp fixes all three at once: the directory name is random, it is created
+// 0700, and nothing inside it can be pre-created by anyone else. The file is
+// written 0600 as well, and `wx` refuses rather than follows if anything is
+// somehow already there.
+function createScratchDir() {
+  return fs.mkdtempSync(path.join(os.tmpdir(), 'voicegoat-'));
+}
+
+function removeScratchDir(dir) {
+  if (!dir) return;
+  try { fs.rmSync(dir, { recursive: true, force: true }); } catch (_) { /* best effort */ }
+}
+
+function writeScreenshot(dir, dataUrl) {
+  const match = /^data:(.+?);base64,(.*)$/s.exec(dataUrl || '');
+  if (!match) return null;
+  const file = path.join(dir, 'screen.png');
+  fs.writeFileSync(file, Buffer.from(match[2], 'base64'), { mode: 0o600, flag: 'wx' });
+  return file;
+}
+
 function isAvailable() {
   return CANDIDATE_PATHS.some((candidate) => {
     try { return fs.existsSync(candidate); } catch (_) { return false; }
@@ -60,16 +91,8 @@ function version(timeoutMs = 5000) {
  * in front of the model.
  */
 async function stream({ system, turns, imageDataUrl, onToken, abortSignal, model }) {
-  const scratchFiles = [];
-  let imagePath = null;
-  if (imageDataUrl) {
-    const match = /^data:(.+?);base64,(.*)$/s.exec(imageDataUrl);
-    if (match) {
-      imagePath = path.join(os.tmpdir(), `voicegoat-screen-${process.pid}-${Date.now()}.png`);
-      fs.writeFileSync(imagePath, Buffer.from(match[2], 'base64'));
-      scratchFiles.push(imagePath);
-    }
-  }
+  const scratchDir = createScratchDir();
+  const imagePath = imageDataUrl ? writeScreenshot(scratchDir, imageDataUrl) : null;
 
   const question = turns.map((turn) => turn.text).join('\n\n');
   const prompt = imagePath
@@ -95,7 +118,10 @@ async function stream({ system, turns, imageDataUrl, onToken, abortSignal, model
     try {
       child = spawn(resolveBinary(), args, {
         stdio: ['pipe', 'pipe', 'pipe'],
-        cwd: os.tmpdir()   // never let it wander into a project directory
+        // The private directory doubles as the working directory, so anything
+        // the CLI writes lands somewhere only this user can read, and goes away
+        // with everything else.
+        cwd: scratchDir
       });
     } catch (error) {
       cleanup();
@@ -108,7 +134,7 @@ async function stream({ system, turns, imageDataUrl, onToken, abortSignal, model
     let settled = false;
 
     function cleanup() {
-      for (const file of scratchFiles) { try { fs.unlinkSync(file); } catch (_) {} }
+      removeScratchDir(scratchDir);
     }
     function finish(fn, value) {
       if (settled) return;
@@ -176,4 +202,4 @@ async function stream({ system, turns, imageDataUrl, onToken, abortSignal, model
   });
 }
 
-module.exports = { isAvailable, version, resolveBinary, stream };
+module.exports = { isAvailable, version, resolveBinary, stream, createScratchDir, writeScreenshot, removeScratchDir };
