@@ -125,3 +125,80 @@ test('warming never becomes something the caller has to handle', () => withFetch
 test('warming without a model chosen does nothing', async () => {
   assert.deepStrictEqual(await ollama.warmModel('http://x', ''), { ok: false });
 });
+
+// Cancelling a download is the one operation here that has to stay wired for
+// the whole life of a response body rather than just until its headers land.
+// It did not: the shared request helper detached its abort listener in a
+// finally block that ran as soon as the headers arrived, so the Cancel button
+// reached a listener that was no longer attached and multi-gigabyte downloads
+// ran to completion regardless.
+function streamingFetch({ chunks, onAbort }) {
+  return async (_url, init) => {
+    const signal = init && init.signal;
+    return {
+      ok: true,
+      status: 200,
+      body: (async function* () {
+        for (const chunk of chunks) {
+          if (signal && signal.aborted) {
+            if (onAbort) onAbort();
+            const error = new Error('aborted');
+            error.name = 'AbortError';
+            throw error;
+          }
+          yield Buffer.from(JSON.stringify(chunk) + '\n');
+          await new Promise((resolve) => setTimeout(resolve, 5));
+        }
+      })()
+    };
+  };
+}
+
+test('a download stops when it is cancelled part way through', () => withFetch(
+  streamingFetch({ chunks: Array.from({ length: 200 }, (_, i) => ({ status: 'pulling', completed: i, total: 200 })) }),
+  async () => {
+    const controller = new AbortController();
+    let seen = 0;
+    const pull = ollama.pullModel('http://x', 'big:model', {
+      signal: controller.signal,
+      onProgress: () => {
+        seen++;
+        if (seen === 3) controller.abort();
+      }
+    });
+    await assert.rejects(pull, (error) => error.name === 'AbortError');
+    // The stream must stop where it was cancelled, not run to the end.
+    assert.ok(seen < 200, `consumed ${seen} of 200 chunks after cancelling`);
+  }
+));
+
+test('a download cancelled before it starts never opens a request', () => {
+  const controller = new AbortController();
+  controller.abort();
+  const original = global.fetch;
+  let called = false;
+  global.fetch = async () => { called = true; };
+  return ollama.pullModel('http://x', 'big:model', { signal: controller.signal })
+    .then(() => assert.fail('should have rejected'))
+    .catch(() => { assert.strictEqual(called, false, 'a cancelled pull still opened a connection'); })
+    .finally(() => { global.fetch = original; });
+});
+
+test('a download that is never cancelled still completes', () => withFetch(
+  streamingFetch({ chunks: [{ status: 'pulling', completed: 1, total: 2 }, { status: 'success' }] }),
+  async () => {
+    const progress = [];
+    const result = await ollama.pullModel('http://x', 'small:model', { onProgress: (p) => progress.push(p) });
+    assert.deepStrictEqual(result, { ok: true, model: 'small:model' });
+    assert.strictEqual(progress.length, 2);
+    assert.strictEqual(progress[0].percent, 50);
+  }
+));
+
+test('an error reported inside the stream surfaces as a failure', () => withFetch(
+  streamingFetch({ chunks: [{ status: 'pulling' }, { error: 'no such model' }] }),
+  async () => assert.rejects(
+    ollama.pullModel('http://x', 'ghost:model', {}),
+    /no such model/
+  )
+));

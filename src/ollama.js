@@ -79,7 +79,10 @@ async function request(baseUrl, route, { method = 'GET', body, signal, timeoutMs
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   const onAbort = () => controller.abort();
-  if (signal) signal.addEventListener('abort', onAbort, { once: true });
+  if (signal) {
+    if (signal.aborted) controller.abort();
+    else signal.addEventListener('abort', onAbort, { once: true });
+  }
   try {
     return await fetch(normalizeBase(baseUrl) + route, {
       method,
@@ -171,13 +174,32 @@ async function listModels(baseUrl) {
  * dividing by zero.
  */
 async function pullModel(baseUrl, model, { onProgress, signal } = {}) {
-  const response = await request(baseUrl, '/api/pull', {
-    method: 'POST',
-    body: { model, stream: true },
-    signal,
-    timeoutMs: 24 * 60 * 60 * 1000
-  });
+  // Deliberately not routed through request(). That helper detaches its abort
+  // listener in a finally block, which runs the moment the response headers
+  // arrive — for a download that is at the very start, before a single byte of
+  // the body has been read. Cancelling after that point reached a listener that
+  // was no longer attached, so the Cancel button did nothing and the download
+  // ran to completion. A stream has to hold its cancellation for as long as it
+  // is being consumed, so this owns the wiring itself.
+  if (signal && signal.aborted) throw new Error('cancelled');
+  const controller = new AbortController();
+  const onAbort = () => controller.abort();
+  if (signal) signal.addEventListener('abort', onAbort, { once: true });
+
+  let response;
+  try {
+    response = await fetch(normalizeBase(baseUrl) + '/api/pull', {
+      method: 'POST',
+      signal: controller.signal,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model, stream: true })
+    });
+  } catch (error) {
+    if (signal) signal.removeEventListener('abort', onAbort);
+    throw error;
+  }
   if (!response.ok || !response.body) {
+    if (signal) signal.removeEventListener('abort', onAbort);
     throw new Error(`Ollama refused the download (${response.status}).`);
   }
 
@@ -185,30 +207,35 @@ async function pullModel(baseUrl, model, { onProgress, signal } = {}) {
   let buffer = '';
   let lastError = null;
 
-  for await (const chunk of response.body) {
-    buffer += decoder.decode(chunk, { stream: true });
-    const lines = buffer.split('\n');
-    buffer = lines.pop();
-    for (const line of lines) {
-      if (!line.trim()) continue;
-      let event;
-      try { event = JSON.parse(line); } catch (_) { continue; }
-      if (event.error) { lastError = event.error; continue; }
-      if (onProgress) {
-        const total = Number(event.total) || 0;
-        const completed = Number(event.completed) || 0;
-        onProgress({
-          model,
-          status: event.status || '',
-          completed,
-          total,
-          percent: total > 0 ? Math.min(100, Math.floor((completed / total) * 100)) : null
-        });
+  try {
+    for await (const chunk of response.body) {
+      buffer += decoder.decode(chunk, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop();
+      for (const line of lines) {
+        if (!line.trim()) continue;
+        let event;
+        try { event = JSON.parse(line); } catch (_) { continue; }
+        if (event.error) { lastError = event.error; continue; }
+        if (onProgress) {
+          const total = Number(event.total) || 0;
+          const completed = Number(event.completed) || 0;
+          onProgress({
+            model,
+            status: event.status || '',
+            completed,
+            total,
+            percent: total > 0 ? Math.min(100, Math.floor((completed / total) * 100)) : null
+          });
+        }
       }
     }
+    if (lastError) throw new Error(lastError);
+    return { ok: true, model };
+  } finally {
+    // Only now is the body finished with, so only now may the wiring go.
+    if (signal) signal.removeEventListener('abort', onAbort);
   }
-  if (lastError) throw new Error(lastError);
-  return { ok: true, model };
 }
 
 /**
