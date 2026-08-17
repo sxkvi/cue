@@ -25,6 +25,23 @@ test('dist/pack scripts do not pass an inline --config that could bypass electro
   }
 });
 
+test('falls back to an unsigned build when the local certificate is absent', () => {
+  const original = { ...process.env };
+  try {
+    delete require.cache[require.resolve('../electron-builder.cjs')];
+    delete process.env.MAC_SIGN;
+    // A name no keychain will hold, which is the situation on any machine that
+    // has not run scripts/make-signing-cert.sh.
+    process.env.VOICEGOAT_SIGN_IDENTITY = 'voicegoat identity that does not exist 8f3a';
+    const config = require('../electron-builder.cjs');
+    assert.equal(config.mac.identity, null, 'a missing certificate must not break the build');
+    assert.equal(config.mac.hardenedRuntime, false);
+  } finally {
+    process.env = original;
+    delete require.cache[require.resolve('../electron-builder.cjs')];
+  }
+});
+
 test('mac config never auto-publishes and only claims hardened runtime / notarization with a real cert', () => {
   const original = { ...process.env };
   try {
@@ -38,11 +55,18 @@ test('mac config never auto-publishes and only claims hardened runtime / notariz
     // publish:null is what stops electron-builder auto-publishing an
     // ad-hoc build over a real release asset just because GH_TOKEN is set.
     assert.equal(unsigned.publish, null);
-    // No cert -> must not claim hardened runtime or notarization (would
-    // otherwise fail the build outright, or worse, silently no-op).
-    assert.equal(unsigned.mac.identity, null);
+    // No Developer ID -> must not claim hardened runtime or notarization
+    // (would otherwise fail the build outright, or worse, silently no-op).
     assert.equal(unsigned.mac.hardenedRuntime, false);
     assert.equal(unsigned.mac.notarize, false);
+    // identity is either null (nothing to sign with) or the local self-signed
+    // certificate, depending on the machine. It must never be undefined, which
+    // is what tells electron-builder to go hunting for a Developer ID.
+    assert.notStrictEqual(unsigned.mac.identity, undefined,
+      'undefined would make electron-builder search for a Developer ID it does not have');
+    if (unsigned.mac.identity !== null) {
+      assert.equal(typeof unsigned.mac.identity, 'string');
+    }
 
     delete require.cache[require.resolve('../electron-builder.cjs')];
     process.env.MAC_SIGN = '1';
