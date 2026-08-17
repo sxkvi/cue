@@ -27,8 +27,8 @@ const canNotarize =
 
 /** @type {import('electron-builder').Configuration} */
 module.exports = {
-  appId: "com.cue.overlay",
-  productName: "cue",
+  appId: "com.voicegoat.app",
+  productName: "voicegoat",
   asar: false,
   publish: null,
   artifactName: "${productName}-${version}-${os}-${arch}.${ext}",
@@ -41,6 +41,7 @@ module.exports = {
   mac: {
     target: [{ target: "zip", arch: ["x64", "arm64"] }],
     category: "public.app-category.productivity",
+    icon: "build-resources/icon.icns",
     // With a real cert, let electron-builder discover it and apply the hardened
     // runtime (notarization is refused without it). Without one, identity:null
     // makes it skip signing rather than fail.
@@ -55,26 +56,28 @@ module.exports = {
     extendInfo: {
       LSUIElement: true,
       NSMicrophoneUsageDescription:
-        "cue transcribes your microphone so it can help you in conversations.",
-      NSCameraUsageDescription: "cue does not use the camera.",
+        "voicegoat transcribes your microphone so it can help you in conversations.",
+      NSCameraUsageDescription: "voicegoat does not use the camera.",
       NSAudioCaptureUsageDescription:
-        "cue captures system audio to transcribe the other participant in a call.",
+        "voicegoat captures system audio to transcribe the other participant in a call.",
     },
   },
   win: {
     target: [{ target: "nsis", arch: ["x64"] }],
     artifactName: "${productName}-win-${arch}.${ext}",
+    icon: "build-resources/icon.png",
   },
-  // A per-user install with a visible directory step: cue is a personal overlay,
+  // A per-user install with a visible directory step: voicegoat is a personal overlay,
   // not a machine-wide service, so it should never need an elevation prompt.
   nsis: {
     oneClick: false,
     perMachine: false,
     allowToChangeInstallationDirectory: true,
-    shortcutName: "cue",
+    shortcutName: "voicegoat",
   },
   linux: {
     target: [{ target: "AppImage", arch: ["x64", "arm64"] }],
     category: "Utility",
+    icon: "build-resources/icon.png",
   },
 };

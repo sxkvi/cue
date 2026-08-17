@@ -1,4 +1,4 @@
-// Inlined Lucide icon paths (MIT, lucide.dev) + cue's own logo glyph.
+// Inlined Lucide icon paths (MIT, lucide.dev) + voicegoat’s own mark.
 // icon(name, {size, stroke, fill}) -> SVG markup string.
 (function () {
   const P = {
@@ -31,13 +31,17 @@
     play: '<path d="M6 4.5v15a1 1 0 0 0 1.5.87l12-7.5a1 1 0 0 0 0-1.74l-12-7.5A1 1 0 0 0 6 4.5z"/>',
     'stop-square': '<rect x="5" y="5" width="14" height="14" rx="3.5"/>'
   };
-  // cue logo — a pinwheel/compass mark inside a ring, echoing Cluely's glyph.
-  const LOGO = '<svg viewBox="0 0 24 24" width="SIZE" height="SIZE" fill="none" xmlns="http://www.w3.org/2000/svg">' +
-    '<circle cx="12" cy="12" r="9.2" stroke="currentColor" stroke-width="1.6"/>' +
-    '<path d="M12 12 6.5 8.2a6.6 6.6 0 0 1 5.5-2.9V12z" fill="currentColor"/>' +
-    '<path d="M12 12 15.8 6.5a6.6 6.6 0 0 1 2.9 5.5H12z" fill="currentColor" opacity="0.72"/>' +
-    '<path d="M12 12 17.5 15.8a6.6 6.6 0 0 1-5.5 2.9V12z" fill="currentColor" opacity="0.5"/>' +
-    '<path d="M12 12 8.2 17.5a6.6 6.6 0 0 1-2.9-5.5H12z" fill="currentColor" opacity="0.85"/>' +
+  // voicegoat's mark: two horns sweeping up around a voice waveform. It reads
+  // as an audio signal first and as horns second, which is the right order —
+  // the app is about hearing a conversation and the name is the joke on top.
+  // Kept in step with scripts/build-brand.js, which rasterises the same paths.
+  const LOGO = '<svg viewBox="0 0 24 24" width="SIZE" height="SIZE" fill="none" stroke="currentColor" ' +
+    'stroke-width="2" stroke-linecap="round" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg">' +
+    '<path d="M7.6 17.9C4.2 15.1 3.2 9.7 5.3 5.6c.6-1.2 2-1.3 2.6-.3"/>' +
+    '<path d="M16.4 17.9c3.4-2.8 4.4-8.2 2.3-12.3-.6-1.2-2-1.3-2.6-.3"/>' +
+    '<path d="M12 6.6v10.8"/>' +
+    '<path d="M9.2 9.6v4.8"/>' +
+    '<path d="M14.8 9.6v4.8"/>' +
     '</svg>';
 
   function icon(name, opts) {

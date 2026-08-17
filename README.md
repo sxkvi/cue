@@ -1,25 +1,25 @@
 <div align="center">
 
-# cue
+# voicegoat
 
 **An open-source AI copilot that floats over your screen — sees what you see, hears your meetings, and stays hidden from screen shares.**
 
-A free, self-hosted alternative to Cluely. Bring your own AI key (OpenAI · Anthropic · Google Gemini · OpenAI-compatible endpoints).
+A free, self-hosted alternative to Cluely. It runs a model **on your own machine** by default — download one from inside the app, in a size that fits — or point it at your Claude subscription, or bring your own API key (OpenAI · Anthropic · Google Gemini · Groq · Azure · any OpenAI-compatible endpoint).
 
-<img src="docs/tutorial.png" width="620" alt="cue first-run tutorial" />
+<img src="docs/tutorial.png" width="620" alt="voicegoat first-run tutorial" />
 
 </div>
 
 ---
 
 > [!IMPORTANT]
-> **Please read this first.** cue tries to stay out of screen recordings/shares, but this is **best-effort, not guaranteed** — on macOS 15.4+ Apple can let modern capture tools see it anyway, on Windows 10 builds older than 2004 it degrades to a black box instead of true exclusion, and a phone camera always can. Using a hidden assistant during a **proctored exam, job interview, or recorded meeting** may break that platform's rules and, in some places, consent laws. cue is built for legitimate uses — your own notes, studying, accessibility, and practice. **You are responsible for how you use it.**
+> **Please read this first.** voicegoat tries to stay out of screen recordings/shares, but this is **best-effort, not guaranteed** — on macOS 15.4+ Apple can let modern capture tools see it anyway, on Windows 10 builds older than 2004 it degrades to a black box instead of true exclusion, and a phone camera always can. Using a hidden assistant during a **proctored exam, job interview, or recorded meeting** may break that platform's rules and, in some places, consent laws. voicegoat is built for legitimate uses — your own notes, studying, accessibility, and practice. **You are responsible for how you use it.**
 
 ---
 
 ## What it does
 
-cue floats a small glass panel on top of everything. It takes **three separate inputs** — your **screen**, your **microphone**, and your **meeting audio** (what the other person says) — and uses an AI model to help you in real time.
+voicegoat floats a small glass panel on top of everything. It takes **three separate inputs** — your **screen**, your **microphone**, and your **meeting audio** (what the other person says) — and uses an AI model to help you in real time.
 
 | Feature | How to trigger | What it uses |
 |---|---|---|
@@ -44,7 +44,7 @@ It's a copilot for **live meetings** ("what do I say to that?") and **coding pro
 | Permissions to grant | Microphone **and** Screen Recording | Microphone only |
 
 > [!NOTE]
-> **Meeting audio needs macOS 14.4+.** Capturing the *other* person — what powers **What should I say?**, **Follow-up questions**, and **Recap** — uses system-audio loopback. On Windows that works out of the box. On macOS it relies on ScreenCaptureKit, which cue enables through Chromium's `MacLoopbackAudioForScreenShare` and `MacSckSystemAudioLoopbackOverride` switches; on older macOS the *Them* channel stays silent while your screen and the **You** channel keep working.
+> **Meeting audio needs macOS 14.4+.** Capturing the *other* person — what powers **What should I say?**, **Follow-up questions**, and **Recap** — uses system-audio loopback. On Windows that works out of the box. On macOS it relies on ScreenCaptureKit, which voicegoat enables through Chromium's `MacLoopbackAudioForScreenShare` and `MacSckSystemAudioLoopbackOverride` switches; on older macOS the *Them* channel stays silent while your screen and the **You** channel keep working.
 
 ---
 
@@ -56,16 +56,16 @@ Option A is the easiest on both platforms. Use Option B if you'd rather run from
 
 Go to the [**Releases**](../../releases) page, then choose your platform:
 
-- **Windows 10/11 (x64):** download **`cue-win-x64.exe`**, run it, and launch cue from the Start menu. The installer is unsigned, so Windows SmartScreen may show an **Unknown publisher** warning.
-- **macOS (Apple silicon):** download **`cue-…-arm64-mac.zip`**, unzip it, drag **`cue.app`** into **Applications**, and open it.
+- **Windows 10/11 (x64):** download **`voicegoat-win-x64.exe`**, run it, and launch voicegoat from the Start menu. The installer is unsigned, so Windows SmartScreen may show an **Unknown publisher** warning.
+- **macOS (Apple silicon):** download **`voicegoat-…-arm64-mac.zip`**, unzip it, drag **`voicegoat.app`** into **Applications**, and open it.
 
 ### Option B — Run from source (macOS or Windows)
 
-You need [Node.js](https://nodejs.org) 22.12+ installed (required by dev dependencies). No Xcode and no Visual Studio build tools required — cue deliberately avoids native modules.
+You need [Node.js](https://nodejs.org) 22.12+ installed (required by dev dependencies). No Xcode and no Visual Studio build tools required — voicegoat deliberately avoids native modules.
 
 ```bash
 git clone https://github.com/Blueturboguy07/cue.git
-cd cue
+cd voicegoat
 npm install
 npm start
 ```
@@ -75,9 +75,9 @@ That's the whole setup on Windows. There's no permission dance — grant the mic
 To build a standalone app:
 ```bash
 npm run pack        # unpacked app in dist/ (either OS)
-npm run pack:win    # unpacked Windows app -> dist/win-unpacked/cue.exe
+npm run pack:win    # unpacked Windows app -> dist/win-unpacked/voicegoat.exe
 npm run dist:mac    # macOS zip            -> dist/
-npm run dist:win    # Windows installer    -> dist/cue-win-x64.exe
+npm run dist:win    # Windows installer    -> dist/voicegoat-win-x64.exe
 ```
 > **macOS note:** the packaged app is **ad-hoc signed** unless a Developer ID certificate is configured. macOS ties permission grants to the exact build, so **rebuilding resets the mic/screen permissions** — you'll grant them again. For everyday use, build once and keep it. Windows has no equivalent problem.
 To build a packaged app:
@@ -101,26 +101,26 @@ Windows x64 and Linux x64/arm64 use checksum-verified binaries from the pinned u
 
 ## First launch — the 1-minute setup
 
-When cue opens the first time, a **built-in tutorial** walks you through everything below. You can reopen it anytime by clicking the **cue logo** (top-left of the pill). Here's the same thing in writing.
+When voicegoat opens the first time, a **built-in tutorial** walks you through everything below. You can reopen it anytime by clicking the **voicegoat logo** (top-left of the pill). Here's the same thing in writing.
 
 ### Step 1 — Grant permissions
 
-cue can't help until your OS lets it see and hear. When you first use a feature you'll usually be prompted — click **Allow**. If no prompt appears, grant access manually.
+voicegoat can't help until your OS lets it see and hear. When you first use a feature you'll usually be prompted — click **Allow**. If no prompt appears, grant access manually.
 
-**On macOS — two grants.** System Settings → **Privacy & Security** → **Microphone** and **Screen Recording** → turn on **cue**. macOS may ask you to **quit & reopen** cue — let it. Screen Recording covers both the screenshot features and meeting-audio capture.
+**On macOS — two grants.** System Settings → **Privacy & Security** → **Microphone** and **Screen Recording** → turn on **voicegoat**. macOS may ask you to **quit & reopen** voicegoat — let it. Screen Recording covers both the screenshot features and meeting-audio capture.
 
 **On Windows — one grant.** Only the microphone needs permission: Settings → **Privacy & security** → **Microphone** → turn on **Microphone access** *and* **Let desktop apps access your microphone**. Screenshots and meeting audio need no permission at all — they work immediately, using Windows loopback capture.
 
 ### Step 2 — Add your AI key (bring your own)
 
-cue uses **your own** API key, so it's free to run (you only pay your AI provider for what you use). Click the **`...`** button in the input box (or press `⌘` `,` on macOS / `Ctrl` `,` on Windows) to open **Settings**, pick a provider, and paste your key:
+voicegoat uses **your own** API key, so it's free to run (you only pay your AI provider for what you use). Click the **`...`** button in the input box (or press `⌘` `,` on macOS / `Ctrl` `,` on Windows) to open **Settings**, pick a provider, and paste your key:
 
 | Provider | Get a key | Notes |
 |---|---|---|
 | **OpenAI** | [platform.openai.com/api-keys](https://platform.openai.com/api-keys) | One key does everything — **but** for the *listening* features the key must have **Whisper / audio** access (a "restricted" project key that only allows chat will give a 403 on transcription). |
 | **Anthropic (Claude)** | [console.anthropic.com](https://console.anthropic.com) | Great for screen & coding help. Claude has no speech-to-text, so add an OpenAI or Gemini key too if you want the listening features. |
 | **Google Gemini** | [aistudio.google.com/apikey](https://aistudio.google.com/apikey) | One key does chat + transcription. |
-| **Azure AI Foundry** | [ai.azure.com](https://ai.azure.com) | Paste your **endpoint** plus your key in Settings. **Azure OpenAI:** `https://&lt;resource&gt;.openai.azure.com/openai` — **AI Foundry:** `https://&lt;host&gt;.cognitiveservices.azure.com` (cue appends `/openai/v1` itself). The **model** fields are your deployment names. No speech-to-text — add an OpenAI or Gemini key for listening. |
+| **Azure AI Foundry** | [ai.azure.com](https://ai.azure.com) | Paste your **endpoint** plus your key in Settings. **Azure OpenAI:** `https://&lt;resource&gt;.openai.azure.com/openai` — **AI Foundry:** `https://&lt;host&gt;.cognitiveservices.azure.com` (voicegoat appends `/openai/v1` itself). The **model** fields are your deployment names. No speech-to-text — add an OpenAI or Gemini key for listening. |
 | **Custom** | Your endpoint or gateway | Any OpenAI-compatible Chat Completions endpoint. The API key is optional for unauthenticated local servers. |
 
 To use an OpenAI-compatible endpoint, select **Custom** and configure its Base URL, API key, and Fast/Smart model IDs. Custom endpoints handle LLM requests only; listening continues to use Deepgram, OpenAI, or Gemini credentials.
@@ -130,7 +130,7 @@ To use an OpenAI-compatible endpoint, select **Custom** and configure its Base U
 | OpenClaw local gateway | `http://127.0.0.1:18789/v1` | `openclaw/default` |
 | Ollama | `http://127.0.0.1:11434/v1` | An installed Ollama model ID |
 
-Your key is stored **only on your computer** (in `cue-data.json`) and is sent **only** to that provider. cue has no server and collects nothing.
+Your key is stored **only on your computer** (in `voicegoat-data.json`) and is sent **only** to that provider. voicegoat has no server and collects nothing.
 
 ### Optional — transcribe locally with whisper.cpp
 
@@ -141,34 +141,34 @@ Local mode is independent from the chat provider, so you can use local speech-to
 - Audio inference stays on your computer and audio is never written to a temporary file.
 - Model files are downloaded only when you ask, support cancel/resume, and are checked against pinned byte counts and SHA-256 hashes.
 - Local mode never silently sends audio to a cloud fallback. A local failure is reported without sending the audio elsewhere.
-- Models are stored under Cue's Electron user-data directory and can be imported or deleted from Settings.
+- Models are stored under voicegoat's Electron user-data directory and can be imported or deleted from Settings.
 
 ### Optional — tailor answers to your background
 
-In **Settings**, paste your résumé or professional background into **Résumé / professional background**. cue uses it as the factual reference for career-related answers and says when the résumé does not provide a detail. You can clear it anytime.
+In **Settings**, paste your résumé or professional background into **Résumé / professional background**. voicegoat uses it as the factual reference for career-related answers and says when the résumé does not provide a detail. You can clear it anytime.
 
 ### Step 3 — The Zoom setting (only needed for Zoom)
 
-cue is hidden from most screen-share tools automatically — **Google Meet, Microsoft Teams, and QuickTime need nothing.** **Zoom** has a specific setting that decides whether it respects cue's "don't capture me" flag:
+voicegoat is hidden from most screen-share tools automatically — **Google Meet, Microsoft Teams, and QuickTime need nothing.** **Zoom** has a specific setting that decides whether it respects voicegoat's "don't capture me" flag:
 
 > **Zoom → Settings → Share Screen → Advanced → Screen capture mode → choose "Advanced capture with window filtering."**
 
 <div align="center"><img src="docs/zoom-setting.png" width="560" alt="Zoom screen capture mode setting" /></div>
 
-**Why:** the *"...with window filtering"* modes tell Zoom to leave out windows that mark themselves as private — which is exactly what cue does. The **"Advanced capture without window filtering"** mode grabs the raw screen and **will show cue**, so avoid it.
+**Why:** the *"...with window filtering"* modes tell Zoom to leave out windows that mark themselves as private — which is exactly what voicegoat does. The **"Advanced capture without window filtering"** mode grabs the raw screen and **will show voicegoat**, so avoid it.
 
 ---
 
 ## How to use it
 
-> On Windows, press **`Ctrl`** wherever **`⌘`** appears below. cue's own UI relabels the keys to match your OS.
+> On Windows, press **`Ctrl`** wherever **`⌘`** appears below. voicegoat's own UI relabels the keys to match your OS.
 
 - **`⌘` `↵` — Assist.** The do-the-smart-thing key. On a coding problem it solves it; in a conversation it tells you what to say. Works from anywhere. Change it under **Settings → Keyboard shortcuts**.
 - **`⌘` `H` — Solve what's on screen.** Screenshots a coding problem and returns the approach, code, and time/space complexity.
 - **The `▢` button** (top bar) — start/stop **listening** to a meeting. The green dot means it's live.
 - **Type a question** in the box and press `↵` to ask about your screen or conversation.
 - **Smart** — flip it on for a smarter, more thorough model; off for fast and cheap.
-- **Hide** collapses the panel to just the top bar. Drag cue around by the **top pill**. Quit with `⌘` `⇧` `X` on macOS or `Ctrl` `Shift` `X` on Windows.
+- **Hide** collapses the panel to just the top bar. Drag voicegoat around by the **top pill**. Quit with `⌘` `⇧` `X` on macOS or `Ctrl` `Shift` `X` on Windows.
 
 The panel is see-through and click-through — the empty space around it never blocks the app behind it.
 
@@ -176,20 +176,20 @@ The panel is see-through and click-through — the empty space around it never b
 
 ## How it works (under the hood)
 
-cue is an [Electron](https://www.electronjs.org/) app. Everything runs locally except the calls to your chosen AI provider.
+voicegoat is an [Electron](https://www.electronjs.org/) app. Everything runs locally except the calls to your chosen AI provider.
 
 **The three inputs are kept completely separate:**
 - **Screen** — captured with Electron's `desktopCapturer` (full-resolution screenshots, taken only when a feature needs one).
 - **Your mic ("You")** — `getUserMedia` → downsampled to 16 kHz audio → transcribed.
-- **Meeting audio ("Them")** — `getDisplayMedia` loopback capture of your system's output audio, kept on its own channel so cue knows *who* said what. **Windows only** — Chromium doesn't implement loopback capture elsewhere, so on macOS this stream comes back video-only and the channel stays silent.
+- **Meeting audio ("Them")** — `getDisplayMedia` loopback capture of your system's output audio, kept on its own channel so voicegoat knows *who* said what. **Windows only** — Chromium doesn't implement loopback capture elsewhere, so on macOS this stream comes back video-only and the channel stays silent.
 
 Both audio streams are transcribed by the independently selected speech provider (local whisper.cpp, Deepgram, OpenAI, or Gemini) and fed, with an optional screenshot, to your chat model. Responses **stream** into the panel word-by-word.
 
-When Local transcription is selected, Cue runs one persistent `whisper-server` sidecar bound to `127.0.0.1` on a temporary port with a random request path. Voice activity detection creates bounded in-memory utterances with pre-roll, and both channels share a serialized inference queue because one Whisper context must not process concurrent requests. Stop immediately ends new audio capture, drains the current queue for a bounded period, then terminates the sidecar.
+When Local transcription is selected, voicegoat runs one persistent `whisper-server` sidecar bound to `127.0.0.1` on a temporary port with a random request path. Voice activity detection creates bounded in-memory utterances with pre-roll, and both channels share a serialized inference queue because one Whisper context must not process concurrent requests. Stop immediately ends new audio capture, drains the current queue for a bounded period, then terminates the sidecar.
 
 **The invisibility** is a single window flag — `setContentProtection(true)` — which the OS enforces:
 
-- **macOS:** sets `NSWindowSharingNone`, asking the window server to exclude cue from capture streams. On macOS 15.4+ Apple lets some capture tools ignore it, which is why it's best-effort (see the disclaimer at the top).
+- **macOS:** sets `NSWindowSharingNone`, asking the window server to exclude voicegoat from capture streams. On macOS 15.4+ Apple lets some capture tools ignore it, which is why it's best-effort (see the disclaimer at the top).
 - **Windows:** sets `WDA_EXCLUDEFROMCAPTURE` via `SetWindowDisplayAffinity`, and the compositor drops the window from every capture path. Windows 10 builds before 2004 fall back to `WDA_MONITOR`, which renders a black box rather than truly excluding.
 
 It's the same mechanism DRM apps and Zoom's own toolbar use. It is **not** a GPU trick or a special overlay layer. Set `CUE_NO_PROTECT=1` to disable it while debugging.
@@ -208,7 +208,7 @@ renderer ──────┴─ the glass UI + mic capture + system-audio loop
 
 **"It says give access, but I already gave access." (macOS)**
 **Local transcription says the runtime is not prepared.**
-Packaged releases include the runtime. If you are running from source, run `npm run prepare:whisper` once and restart Cue. On macOS, install CMake and Xcode command-line tools first.
+Packaged releases include the runtime. If you are running from source, run `npm run prepare:whisper` once and restart voicegoat. On macOS, install CMake and Xcode command-line tools first.
 
 **Local transcription says the model is missing or invalid.**
 Open **Settings → Audio**, select the model, and choose **Download**. A cancelled download can be resumed. If verification fails repeatedly, delete the partial/model file from the same screen and download it again.
@@ -217,19 +217,19 @@ Open **Settings → Audio**, select the model, and choose **Download**. A cancel
 Try `base.en`, `tiny.en`, or a quantized `q5`/`q8` model. Model size in Settings is the download size, not a guarantee of runtime RAM use; larger models require substantially more memory and CPU/GPU time.
 
 **"It says give access, but I already gave access."**
-You probably granted an older build. Because the app is ad-hoc signed, a rebuild changes its identity and macOS stops honoring the old grant (the checkmark can linger). Toggle cue **off and on** in System Settings → Screen Recording, or remove and re-add it.
+You probably granted an older build. Because the app is ad-hoc signed, a rebuild changes its identity and macOS stops honoring the old grant (the checkmark can linger). Toggle voicegoat **off and on** in System Settings → Screen Recording, or remove and re-add it.
 
 **"What should I say?", "Follow-up questions", or "Recap" never hear the other person (macOS).**
 Expected — meeting audio is Windows-only (see [Platform support](#platform-support)). Your own mic still transcribes, so those features see the *You* side of the conversation but never the *Them* side.
 
-**cue has no dock or taskbar icon — how do I quit it?**
-That's deliberate; it stays out of your way. Press **`Ctrl` `Shift` `X`** (**`⌘` `⇧` `X`** on macOS). If the shortcut didn't register because another app claimed it, end the **cue** (or **electron**) process in Task Manager / Activity Monitor.
+**voicegoat has no dock or taskbar icon — how do I quit it?**
+That's deliberate; it stays out of your way. Press **`Ctrl` `Shift` `X`** (**`⌘` `⇧` `X`** on macOS). If the shortcut didn't register because another app claimed it, end the **voicegoat** (or **electron**) process in Task Manager / Activity Monitor.
 
 **`npm start` crashes with `Cannot read properties of undefined (reading 'getPath')`.**
 Something in your environment set **`ELECTRON_RUN_AS_NODE=1`** — some editors and terminals do, notably VS Code's integrated terminal. That makes Electron boot as plain Node, so `require('electron')` returns a path string instead of the real module. Clear it and relaunch: `unset ELECTRON_RUN_AS_NODE` (PowerShell: `Remove-Item Env:\ELECTRON_RUN_AS_NODE`).
 
 **A feature returns "403" / "no access to model."**
-Your API key is restricted. Most often it's an OpenAI **project key that only allows chat models** — it works for screen/coding help but 403s on transcription (Whisper). Fix: enable audio/Whisper on the key, use an unrestricted key, or add a Gemini key (cue falls back to it for transcription).
+Your API key is restricted. Most often it's an OpenAI **project key that only allows chat models** — it works for screen/coding help but 403s on transcription (Whisper). Fix: enable audio/Whisper on the key, use an unrestricted key, or add a Gemini key (voicegoat falls back to it for transcription).
 
 **Listening does nothing / no transcript.**
 Check Settings shows a transcription-capable key (OpenAI with Whisper, or Gemini). On macOS, also make sure Screen Recording is granted (meeting audio needs it). On Windows, make sure **Let desktop apps access your microphone** is on — the top-level Microphone toggle alone isn't enough.
@@ -237,27 +237,27 @@ Check Settings shows a transcription-capable key (OpenAI with Whisper, or Gemini
 **A Custom provider request cannot connect.**
 Confirm the Base URL includes the endpoint's `/v1` path when required, the selected model ID exists on that endpoint, and the local gateway is running. Custom provider credentials are intentionally not reused for speech-to-text.
 
-**cue shows up in my Zoom share.**
+**voicegoat shows up in my Zoom share.**
 Set Zoom's **Screen capture mode** to *"Advanced capture with window filtering"* (see Step 3). And remember: on macOS 15.4+ this can still fail — it's best-effort.
 
-**"cue is damaged and can't be opened."**
-Run `xattr -cr /Applications/cue.app` in Terminal once (see Install → Option A).
+**"voicegoat is damaged and can't be opened."**
+Run `xattr -cr /Applications/voicegoat.app` in Terminal once (see Install → Option A).
 
 ---
 
 ## Privacy
 
-- No Cue accounts, hosted service, or telemetry. cue collects nothing.
-- Your API keys live in a local file (`cue-data.json`) and are sent only to the provider you chose.
+- No voicegoat accounts, hosted service, or telemetry. voicegoat collects nothing.
+- Your API keys live in a local file (`voicegoat-data.json`) and are sent only to the provider you chose.
 - When Custom is selected, its API key and LLM request data are sent to the Base URL you configured.
-- Your optional résumé text also lives in `cue-data.json` and is sent with each model request to your selected AI provider. It is stored as plain text; clear it in Settings to remove it.
+- Your optional résumé text also lives in `voicegoat-data.json` and is sent with each model request to your selected AI provider. It is stored as plain text; clear it in Settings to remove it.
 - In Local transcription mode, microphone and meeting audio stay on your computer. In cloud transcription modes, audio is sent only to the selected speech provider.
-- Audio utterances and the current transcript stay in memory; Cue does not write captured audio to disk. Downloaded local model files remain on disk until you delete them.
+- Audio utterances and the current transcript stay in memory; voicegoat does not write captured audio to disk. Downloaded local model files remain on disk until you delete them.
 - Screenshots are sent to your selected chat provider only when a feature needs the screen.
 
 ## Contributing
 
-Issues and PRs welcome. cue is intentionally small and readable — `main.js` (app + capture + AI), `renderer/` (the UI), `src/` (providers). No build step for the source (plain HTML/CSS/JS).
+Issues and PRs welcome. voicegoat is intentionally small and readable — `main.js` (app + capture + AI), `renderer/` (the UI), `src/` (providers). No build step for the source (plain HTML/CSS/JS).
 
 ## Credits & license
 

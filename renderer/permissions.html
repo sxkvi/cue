@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; img-src 'self' data:;" />
-  <title>cue — Permissions</title>
+  <title>voicegoat — Permissions</title>
   <style>
     :root {
       --accent: #3C83F5;
@@ -185,9 +185,9 @@
   <div id="perm-root">
     <div class="perm-card">
       <div class="perm-icon">🔐</div>
-      <div class="perm-title">cue needs your permission</div>
+      <div class="perm-title">voicegoat needs your permission</div>
       <div class="perm-desc">
-        Grant <strong>Microphone</strong> and <strong>Screen Recording</strong> access so cue can hear your meetings and see your screen.
+        Grant <strong>Microphone</strong> and <strong>Screen Recording</strong> access so voicegoat can hear your meetings and see your screen.
       </div>
 
       <!-- Microphone -->
@@ -214,7 +214,7 @@
 
       <div class="perm-note">
         <strong>Tip:</strong> After toggling a permission in System Settings, click <strong>Check Again</strong> below.
-        If Screen Recording was just enabled, you may need to restart cue for it to take effect.
+        If Screen Recording was just enabled, you may need to restart voicegoat for it to take effect.
       </div>
 
       <div class="perm-actions no-drag">
@@ -228,7 +228,7 @@
 
   <script>
     (function () {
-      const cue = window.cue;
+      const voicegoat = window.voicegoat;
 
       const statusMic = document.getElementById('status-mic');
       const statusScreen = document.getElementById('status-screen');
@@ -270,10 +270,10 @@
         checkBtn.classList.add('checking');
         checkBtn.textContent = 'Checking…';
         try {
-          const status = await cue.permissionsCheck();
+          const status = await voicegoat.permissionsCheck();
           updateUI(status);
         } catch (e) {
-          cue.log('permissions check error: ' + e);
+          voicegoat.log('permissions check error: ' + e);
         } finally {
           checkBtn.classList.remove('checking');
           checkBtn.textContent = 'Check Again';
@@ -282,10 +282,10 @@
 
       // Open settings buttons
       btnMic.addEventListener('click', () => {
-        cue.openPane('x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone');
+        voicegoat.openPane('x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone');
       });
       btnScreen.addEventListener('click', () => {
-        cue.openPane('x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture');
+        voicegoat.openPane('x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture');
       });
 
       // Check again
@@ -293,11 +293,11 @@
 
       // Continue — close permission window and launch the real app
       continueBtn.addEventListener('click', () => {
-        cue.permissionsContinue();
+        voicegoat.permissionsContinue();
       });
 
       // Quit
-      quitBtn.addEventListener('click', () => cue.quit());
+      quitBtn.addEventListener('click', () => voicegoat.quit());
 
       // Initial check on page load
       checkPermissions();

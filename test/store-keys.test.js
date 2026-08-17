@@ -33,7 +33,7 @@ function loadStore({ encryptionAvailable }) {
   const resolved = require.resolve('../src/store');
   delete require.cache[resolved];
   try {
-    return { store: require('../src/store'), userData, file: path.join(userData, 'cue-data.json') };
+    return { store: require('../src/store'), userData, file: path.join(userData, 'voicegoat-data.json') };
   } finally {
     Module._load = originalLoad;
     delete require.cache[resolved];
@@ -120,4 +120,13 @@ test('ships the defaults the redesigned interface depends on', () => {
   assert.strictEqual(settings.disguiseProcess, true);
   assert.ok(settings.shortcuts.assist, 'every action needs a default accelerator');
   assert.ok(settings.shortcuts.quit);
+});
+
+test('defaults to a model on this machine rather than a paid account', () => {
+  const { store } = loadStore({ encryptionAvailable: true });
+  const settings = store.getSettings();
+  assert.strictEqual(settings.provider, 'ollama');
+  // Naming a model nobody has pulled yet would 404 on the first question, so
+  // the field stays empty until the in-app downloader fills it.
+  assert.strictEqual(settings.models.ollama.fast, '');
 });

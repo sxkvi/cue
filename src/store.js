@@ -13,7 +13,7 @@ const path = require('path');
 const { app, safeStorage } = require('electron');
 const { normalizeBaseUrl } = require('./openai-compatible');
 
-const FILE = path.join(app.getPath('userData'), 'cue-data.json');
+const FILE = path.join(app.getPath('userData'), 'voicegoat-data.json');
 
 // Cap on the user's custom response rules. Generous but bounded: anything longer
 // should live in a real prompt file, not in a settings field.
@@ -25,7 +25,7 @@ const KEY_NAMES = ['openai', 'anthropic', 'gemini', 'deepgram', 'custom', 'ollam
 const COMPUTED_FIELDS = ['secureStorage'];
 
 const DEFAULTS = {
-  provider: 'openai',
+  provider: 'ollama',
   sttProvider: 'auto',
   localWhisper: {
     modelId: 'base.en',
@@ -35,7 +35,7 @@ const DEFAULTS = {
   smart: false,
   baseUrl: '',
   minimaxRegion: 'global_en',
-  apiKeys: { openai: '', anthropic: '', gemini: '', deepgram: '', custom: '', ollama: '', groq: '', minimax: '', azure: '' },
+  apiKeys: { openai: '', anthropic: '', gemini: '', deepgram: '', custom: '', ollama: '', groq: '', minimax: '', azure: '', claudecode: '' },
   azureEndpoint: '',
   // Tab 2: Profile
   resumeText: '',
@@ -94,10 +94,17 @@ const DEFAULTS = {
     // on every request. gemini-2.5-flash is current and free-tier available.
     gemini: { fast: 'gemini-2.5-flash', smart: 'gemini-2.5-flash' },
     custom: { fast: '', smart: '' },
-    ollama: { fast: 'llama3.2', smart: 'llama3.3' },
+    // Filled in by the in-app downloader rather than guessed: naming a model
+    // nobody has pulled produces a 404 on the first question.
+    ollama: { fast: '', smart: '' },
     groq: { fast: 'llama-3.1-8b-instant', smart: 'llama-3.3-70b-versatile' },
     minimax: { fast: 'MiniMax-M2.7', smart: 'MiniMax-M3' },
-    azure: { fast: 'gpt-4o-mini', smart: 'gpt-4o' }
+    azure: { fast: 'gpt-4o-mini', smart: 'gpt-4o' },
+    // Empty until a model is downloaded, so the onboarding step has something
+    // honest to react to rather than naming a model that is not there.
+    ollamaLocal: { fast: '', smart: '' },
+    // Claude Code picks its own model from the subscription's configuration.
+    claudecode: { fast: '', smart: '' }
   }
 };
 

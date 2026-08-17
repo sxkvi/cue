@@ -738,7 +738,12 @@ textarea { width: 100%; resize: vertical; line-height: 1.55; -webkit-user-select
 .s-shortcut-warn { color: var(--ember); font-size: 11px; margin: 2px 0 0; }
 
 /* ---- onboarding / consent / quit ---- */
-#onboard { width: min(468px, 93vw); padding: 24px 26px 14px; text-align: center; animation: panelIn 220ms var(--ease); }
+#onboard {
+  width: min(468px, 93vw); padding: 24px 26px 14px; text-align: center;
+  /* The brain step carries a model list, so this can outgrow the window. */
+  max-height: 92vh; overflow-y: auto;
+  animation: panelIn 220ms var(--ease);
+}
 .ob-dots { display: flex; gap: 5px; justify-content: center; margin-bottom: 18px; }
 .ob-dots span { width: 6px; height: 6px; border-radius: 3px; background: var(--fill-2); transition: all 200ms var(--ease); }
 .ob-dots span.on { background: var(--plain); width: 18px; }
@@ -859,4 +864,58 @@ body.reduce-motion *, body.reduce-motion *::before, body.reduce-motion *::after 
   #stage { flex-direction: column; align-items: center; }
   #stage.rail-open #panel-wrap { width: min(624px, 92vw); }
   .rail { width: min(624px, 92vw); flex: none; max-height: 30vh; }
+}
+
+/* ==================== A model on this machine ==================== */
+/* The downloader appears in two places — the onboarding step that asks which
+   brain to use, and the settings pane — from one builder, so it is styled once. */
+.lm-list { display: flex; flex-direction: column; gap: 4px; margin-top: 6px; }
+.lm-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 11px;
+  border: 1px solid var(--hair);
+  border-radius: var(--r-card);
+  background: var(--fill);
+  text-align: left;
+}
+.lm-row.installed { border-color: rgba(52,211,153,0.25); background: rgba(52,211,153,0.05); }
+.lm-text { min-width: 0; }
+.lm-name { font-size: 12.5px; font-weight: 560; color: var(--vellum); }
+.lm-meta { font-size: 11px; color: var(--whisper); margin-top: 1px; }
+.lm-note { font-size: 11px; color: var(--faint); margin-top: 3px; line-height: 1.4; }
+/* Whether a model can see the screen decides whether two of the four actions
+   work at all, so it is called out rather than buried in the description. */
+.lm-sight { color: var(--faint); }
+.lm-sight.can { color: var(--live); }
+.lm-actions { display: flex; align-items: center; gap: 5px; flex-shrink: 0; }
+.lm-progress { grid-column: 1 / -1; display: flex; align-items: center; gap: 8px; }
+.lm-progress progress { flex: 1; height: 6px; accent-color: var(--live); }
+.lm-progress span { font-size: 11px; color: var(--whisper); min-width: 92px; text-align: right; }
+.lm-log {
+  margin: 8px 0 0; padding: 8px 10px; max-height: 92px; overflow-y: auto;
+  border: 1px solid var(--hair); border-radius: var(--r-ctl);
+  background: var(--ink-sunken);
+  font-family: var(--font-mono); font-size: 10.5px; line-height: 1.5;
+  color: var(--whisper); white-space: pre-wrap; word-break: break-all;
+}
+.lm-warn {
+  margin: 8px 0 0; padding: 9px 11px;
+  border: 1px solid rgba(244,161,93,0.28); border-radius: var(--r-ctl);
+  background: rgba(244,161,93,0.09);
+  color: #F6C89A; font-size: 11.5px; line-height: 1.5;
+}
+.ob-local { margin-top: 14px; text-align: left; }
+.ob-local[hidden] { display: none; }
+.ob-local .s-label { font-size: 12.5px; }
+.ob-local .lm-list { max-height: 232px; overflow-y: auto; }
+
+/* Shown on the panel itself, because the consequence is felt there: two of the
+   action buttons are off and the reason is not otherwise visible. */
+.vision-note {
+  margin: 8px 0 0;
+  font-size: 11.5px; line-height: 1.5;
+  color: #F6C89A;
 }

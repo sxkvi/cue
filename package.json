@@ -1,9 +1,9 @@
 {
-  "name": "cue",
+  "name": "voicegoat",
   "version": "0.2.2",
-  "description": "Open-source cross-platform invisible AI overlay — three separate inputs (screen, mic, system audio) into an LLM. A Cluely-style copilot for meetings and coding problems.",
+  "description": "Open-source cross-platform invisible AI overlay — three separate inputs (screen, mic, system audio) into an LLM you choose, including one running on your own machine.",
   "license": "GPL-3.0-or-later",
-  "author": "cue",
+  "author": "voicegoat",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
@@ -17,14 +17,16 @@
     "dist:win": "electron-builder --win",
     "pack:win": "electron-builder --win --dir",
     "dist:linux": "electron-builder --linux AppImage --x64",
-    "dist:linux:arm64": "electron-builder --linux AppImage --arm64"
+    "dist:linux:arm64": "electron-builder --linux AppImage --arm64",
+    "brand": "electron scripts/build-brand.js"
   },
   "keywords": [
     "electron",
     "overlay",
     "ai",
     "assistant",
-    "windows",
+    "local-llm",
+    "ollama",
     "cross-platform"
   ],
   "devDependencies": {

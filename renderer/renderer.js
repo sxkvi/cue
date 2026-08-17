@@ -694,6 +694,10 @@
   //  never right. Any name can still be typed.
   // ======================================================================
   const PROVIDERS = {
+    // Neither of the first two takes a key: one runs on this machine, the other
+    // borrows an authenticated CLI. `keyless` is what suppresses the key field.
+    ollama:     { label: 'Ollama', placeholder: 'http://localhost:11434', url: '', secret: false, keyless: true, local: true },
+    claudecode: { label: 'Claude Code', placeholder: '', url: 'https://claude.com/claude-code', keyless: true },
     openai:    { label: 'OpenAI',    placeholder: 'sk-…',      url: 'https://platform.openai.com/api-keys' },
     anthropic: { label: 'Anthropic', placeholder: 'sk-ant-…',  url: 'https://console.anthropic.com/settings/keys' },
     gemini:    { label: 'Gemini',    placeholder: 'AIza…',     url: 'https://aistudio.google.com/apikey' },
@@ -708,6 +712,296 @@
     const models = (settings.models && settings.models[provider]) || {};
     return [models.fast, models.smart].filter(Boolean);
   }
+
+  // ======================================================================
+  //  A model on this machine
+  //
+  //  One builder, rendered both into settings and into the onboarding step
+  //  that asks which brain to use — the download has to be reachable at the
+  //  moment the question is asked, not filed away in a settings screen the
+  //  user has not opened yet.
+  // ======================================================================
+  let localState = null;
+  let pulling = null;         // the model id currently downloading
+  let installing = false;
+  const localHosts = new Set();
+
+  function bytesLabel(bytes) {
+    if (!Number.isFinite(bytes) || bytes <= 0) return '—';
+    return (bytes / 1e9).toFixed(1) + ' GB';
+  }
+
+  async function refreshLocal() {
+    try { localState = await cue.localStatus(); }
+    catch (_) { localState = { running: false, installed: false, models: [] }; }
+    paintLocalPanels();
+    refreshCapabilities();
+  }
+
+  function paintLocalPanels() {
+    for (const host of localHosts) {
+      if (host.isConnected) renderLocalPanel(host);
+      else localHosts.delete(host);
+    }
+  }
+
+  function localRow(model) {
+    const row = document.createElement('div');
+    row.className = 'lm-row' + (model.installed ? ' installed' : '');
+
+    const text = document.createElement('div');
+    text.className = 'lm-text';
+    const name = document.createElement('div');
+    name.className = 'lm-name';
+    name.textContent = model.label;
+    const meta = document.createElement('div');
+    meta.className = 'lm-meta';
+    const sight = document.createElement('span');
+    sight.className = 'lm-sight' + (model.vision ? ' can' : '');
+    sight.textContent = t(model.vision ? 'local.sees' : 'local.blind');
+    meta.append(document.createTextNode(bytesLabel(model.bytes) + ' · '), sight);
+    text.append(name, meta);
+    // The catalogue's own note is English; a translated one wins when there is
+    // one, which there is for every model voicegoat ships in the list.
+    const noteKey = 'local.note.' + model.id;
+    const translated = t(noteKey);
+    const note = translated === noteKey ? model.note : translated;
+    if (note) {
+      const el = document.createElement('div');
+      el.className = 'lm-note';
+      el.textContent = note;
+      text.appendChild(el);
+    }
+    row.appendChild(text);
+
+    const actions = document.createElement('div');
+    actions.className = 'lm-actions';
+    const chosen = (settings.models.ollama || {}).fast === model.id;
+
+    if (pulling === model.id) {
+      const bar = document.createElement('div');
+      bar.className = 'lm-progress';
+      bar.innerHTML = '<progress max="100" value="0"></progress><span class="s-mono"></span>';
+      row.appendChild(bar);
+      const cancel = document.createElement('button');
+      cancel.className = 's-action';
+      cancel.textContent = t('local.cancel');
+      cancel.addEventListener('click', () => cue.localCancel());
+      actions.appendChild(cancel);
+    } else if (model.installed) {
+      if (chosen) {
+        const badge = document.createElement('span');
+        badge.className = 's-badge ready';
+        badge.textContent = t('local.inUse');
+        actions.appendChild(badge);
+      } else {
+        const use = document.createElement('button');
+        use.className = 's-action primary';
+        use.textContent = t('local.use');
+        use.addEventListener('click', () => chooseLocalModel(model.id));
+        actions.appendChild(use);
+      }
+      const remove = document.createElement('button');
+      remove.className = 's-action danger';
+      remove.textContent = t('local.remove');
+      remove.addEventListener('click', async () => {
+        const result = await cue.localRemove(model.id);
+        if (!result.ok) showToast(result.message, 3000);
+        await refreshLocal();
+      });
+      actions.appendChild(remove);
+    } else {
+      const download = document.createElement('button');
+      download.className = 's-action' + (model.recommended ? ' primary' : '');
+      download.textContent = t('local.download');
+      download.disabled = !!pulling;
+      download.addEventListener('click', () => startPull(model.id));
+      actions.appendChild(download);
+    }
+    row.appendChild(actions);
+    return row;
+  }
+
+  async function selectProvider(provider) {
+    settings.provider = provider;
+    settings = await cue.settingsSet({ provider });
+    await refreshCapabilities();
+    paintSmartTooltip();
+  }
+
+  async function chooseLocalModel(id) {
+    settings.provider = 'ollama';
+    settings.models.ollama = { fast: id, smart: id };
+    settings = await cue.settingsSet({ provider: 'ollama', models: { ollama: { fast: id, smart: id } } });
+    // Load it now, while the user is still reading, rather than on their first
+    // real question.
+    cue.localWarm();
+    paintLocalPanels();
+    await refreshCapabilities();
+    paintSmartTooltip();
+  }
+
+  async function startPull(id) {
+    pulling = id;
+    paintLocalPanels();
+    const result = await cue.localPull(id);
+    pulling = null;
+    if (result && result.ok) {
+      // Downloading a model and then not using it is never what was meant.
+      await chooseLocalModel(id);
+    } else if (result && !result.cancelled && result.message) {
+      showToast(t('local.pullFailed', { message: result.message }), 4000);
+    }
+    await refreshLocal();
+  }
+
+  function renderLocalPanel(host) {
+    localHosts.add(host);
+    host.innerHTML = '';
+
+    const title = document.createElement('h3');
+    title.className = 's-label';
+    title.textContent = t('local.title');
+    const why = document.createElement('p');
+    why.className = 's-note';
+    why.textContent = t('local.why');
+    host.append(title, why);
+
+    if (!localState) return;
+
+    // Three states, and each one gets the single action that resolves it.
+    if (!localState.installed) {
+      const note = document.createElement('p');
+      note.className = 's-note';
+      note.textContent = t('local.missing');
+      host.appendChild(note);
+      const actions = document.createElement('div');
+      actions.className = 's-actions';
+      if (localState.canInstall) {
+        const install = document.createElement('button');
+        install.className = 's-action primary';
+        install.textContent = t(installing ? 'local.installing' : 'local.install');
+        install.disabled = installing;
+        install.addEventListener('click', async () => {
+          installing = true;
+          paintLocalPanels();
+          const result = await cue.localInstall();
+          installing = false;
+          if (!result.ok) showToast(result.message || t('local.manual'), 4000);
+          await refreshLocal();
+        });
+        actions.appendChild(install);
+      } else {
+        const manual = document.createElement('p');
+        manual.className = 's-note';
+        manual.textContent = t('local.manual');
+        host.appendChild(manual);
+        const open = document.createElement('button');
+        open.className = 's-action';
+        open.textContent = t('local.install');
+        open.addEventListener('click', () => cue.openPane('https://ollama.com/download'));
+        actions.appendChild(open);
+      }
+      host.appendChild(actions);
+      const log = document.createElement('pre');
+      log.className = 'lm-log';
+      log.id = 'local-install-log';
+      log.hidden = !installing;
+      host.appendChild(log);
+      return;
+    }
+
+    if (!localState.running) {
+      const note = document.createElement('p');
+      note.className = 's-note';
+      note.textContent = t('local.stopped');
+      const start = document.createElement('button');
+      start.className = 's-action primary';
+      start.textContent = t('local.start');
+      start.addEventListener('click', async () => {
+        start.disabled = true;
+        start.textContent = t('local.starting');
+        await cue.localStart();
+        await refreshLocal();
+      });
+      host.append(note, start);
+      return;
+    }
+
+    const badge = document.createElement('span');
+    badge.className = 's-badge ready';
+    badge.textContent = t('local.installed', { version: localState.version });
+    host.appendChild(badge);
+
+    const list = document.createElement('div');
+    list.className = 'lm-list';
+    for (const model of localState.models) list.appendChild(localRow(model));
+    host.appendChild(list);
+
+    const custom = document.createElement('div');
+    custom.className = 's-field';
+    const field = document.createElement('input');
+    field.type = 'text';
+    field.placeholder = t('local.custom');
+    field.addEventListener('keydown', (event) => {
+      if (event.key !== 'Enter' || !field.value.trim()) return;
+      event.preventDefault();
+      startPull(field.value.trim());
+      field.value = '';
+    });
+    custom.appendChild(field);
+    host.appendChild(custom);
+  }
+
+  // Assist and Solve screen send a screenshot. When the chosen model cannot
+  // accept one they are switched off with the reason attached, rather than
+  // left to fail with whatever the provider says.
+  let visionAvailable = true;
+  async function refreshCapabilities() {
+    try {
+      const capabilities = await cue.localCapabilities();
+      visionAvailable = capabilities.vision !== false;
+      applyVisionGating(capabilities);
+    } catch (_) { /* leave the actions enabled rather than guessing */ }
+  }
+
+  function applyVisionGating(capabilities) {
+    const reason = t('local.blindWarning', { model: (capabilities && capabilities.model) || '' });
+    $$('.act[data-mode="assist"]').forEach((button) => {
+      button.disabled = !visionAvailable;
+      button.title = visionAvailable ? t('action.assist.tip') : reason;
+    });
+    const note = $('#vision-note');
+    if (visionAvailable) { if (note) note.remove(); return; }
+    if (note) { note.textContent = reason; return; }
+    const created = document.createElement('p');
+    created.id = 'vision-note';
+    created.className = 'vision-note';
+    created.textContent = reason;
+    $('#action-row').insertAdjacentElement('afterend', created);
+  }
+
+  cue.on('local:pull-progress', (progress) => {
+    const bar = document.querySelector('.lm-progress');
+    if (!bar) return;
+    const meter = bar.querySelector('progress');
+    const label = bar.querySelector('span');
+    if (progress.percent === null) {
+      meter.removeAttribute('value');
+      label.textContent = t('local.preparing');
+      return;
+    }
+    meter.value = progress.percent;
+    label.textContent = t('local.downloading', { percent: progress.percent, total: bytesLabel(progress.total) });
+  });
+  cue.on('local:install-progress', ({ line }) => {
+    const log = $('#local-install-log');
+    if (!log) return;
+    log.hidden = false;
+    log.textContent = (log.textContent + '\n' + line).split('\n').slice(-6).join('\n');
+    log.scrollTop = log.scrollHeight;
+  });
+  cue.on('local:models-changed', () => refreshLocal());
 
   // ======================================================================
   //  Settings
@@ -748,6 +1042,15 @@
   function paintProviderPane() {
     const provider = settings.provider;
     const meta = PROVIDERS[provider] || { label: provider, placeholder: '', url: '' };
+
+    // A provider that needs no credential should not show a credential field.
+    const keyGroup = $('#active-key').closest('.s-group');
+    keyGroup.classList.toggle('hidden', !!meta.keyless);
+    $('#local-panel').classList.toggle('hidden', !meta.local);
+    if (meta.local) renderLocalPanel($('#local-panel'));
+    // Claude Code chooses its own model from the subscription's settings.
+    $('#model-fast').closest('.s-group').classList.toggle('hidden', provider === 'claudecode');
+    if (provider === 'claudecode') paintClaudeCode();
 
     $('#active-key-name').textContent = meta.label;
     const keyInput = $('#active-key');
@@ -824,6 +1127,45 @@
     $('#s-status').textContent = statusLine();
     $('#test-result').textContent = '';
     $('#test-result').className = 's-result';
+  }
+
+  // The subscription route is worth offering and worth being honest about: it
+  // is markedly slower to first word than either alternative, and that is the
+  // one thing that matters in a live conversation.
+  async function paintClaudeCode() {
+    const host = $('#local-panel');
+    host.classList.remove('hidden');
+    host.innerHTML = '';
+    const title = document.createElement('h3');
+    title.className = 's-label';
+    title.textContent = t('claudecode.title');
+    const why = document.createElement('p');
+    why.className = 's-note';
+    why.textContent = t('claudecode.why');
+    host.append(title, why);
+
+    let status = { available: false, version: null };
+    try { status = await cue.claudeCodeStatus(); } catch (_) { /* treated as missing */ }
+
+    const badge = document.createElement('span');
+    badge.className = 's-badge ' + (status.available ? 'ready' : 'error');
+    badge.textContent = status.available
+      ? t('claudecode.found', { version: status.version || '' })
+      : t('claudecode.missing');
+    host.appendChild(badge);
+
+    if (!status.available) {
+      const get = document.createElement('button');
+      get.className = 's-action';
+      get.textContent = t('claudecode.get');
+      get.addEventListener('click', () => cue.openPane('https://claude.com/claude-code'));
+      host.appendChild(get);
+    }
+
+    const warning = document.createElement('p');
+    warning.className = 'lm-warn';
+    warning.textContent = t('claudecode.slow');
+    host.appendChild(warning);
   }
 
   function fieldRow(label, id, value, placeholder, secret) {
@@ -1662,11 +2004,17 @@
       { icon: 'logo', title: t('ob.welcome.title'), body: t('ob.welcome.body') },
       permissionStep(),
       {
+        // The download lives here rather than behind a settings screen: this is
+        // the moment the question is asked, so this is where the answer has to
+        // be reachable.
         icon: 'zap',
-        title: t('ob.key.title'),
-        body: t('ob.key.body'),
-        checks: [{ id: 'key', name: t('ob.key.paste'), why: '', open: () => { finishOnboard(); openSettings('keys'); }, openLabel: t('ob.key.open') }],
-        buttons: [{ label: t('ob.key.open'), run: () => { finishOnboard(); openSettings('keys'); } }]
+        title: t('ob.brain.title'),
+        body: t('ob.brain.body'),
+        local: true,
+        buttons: [
+          { label: t('ob.brain.claude'), run: async () => { await selectProvider('claudecode'); openSettings('keys'); finishOnboard(); } },
+          { label: t('ob.brain.key'), run: () => { finishOnboard(); openSettings('keys'); } }
+        ]
       },
       { icon: 'eye-off', title: t('ob.zoom.title'), body: t('ob.zoom.body') },
       {
@@ -1682,13 +2030,17 @@
     ];
   }
 
+  let checksToken = 0;
   async function paintChecks(step) {
+    const token = ++checksToken;
     const host = $('#ob-checks');
     host.innerHTML = '';
     if (!step.checks) return;
 
     let permissions = { mic: 'granted', screen: 'granted' };
     try { permissions = await cue.permissionsCheck(); } catch (_) { /* non-mac reports granted */ }
+    // The await above can outlive the step that started it.
+    if (token !== checksToken) return;
     const hasKey = !!(settings.apiKeys && settings.apiKeys[settings.provider]);
 
     for (const check of step.checks) {
@@ -1738,6 +2090,10 @@
     $('#ob-title').textContent = step.title;
     $('#ob-body').innerHTML = step.body;
     paintChecks(step);
+    const localHost = $('#ob-local');
+    localHost.hidden = !step.local;
+    if (step.local) { localHosts.add(localHost); renderLocalPanel(localHost); }
+    else localHosts.delete(localHost);
 
     const buttons = $('#ob-buttons');
     buttons.innerHTML = '';
@@ -1905,6 +2261,8 @@
     showEmptyState();
     syncPlaceholder();
     paintListenBar();
+
+    await refreshLocal();
 
     const state = await cue.captureState();
     capturing = !!state.active;

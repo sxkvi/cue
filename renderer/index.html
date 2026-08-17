@@ -3,14 +3,14 @@
 <head>
   <meta charset="utf-8" />
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' data:;" />
-  <title>cue</title>
+  <title>voicegoat</title>
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
   <div id="app">
 
     <!-- Toolbar. The only always-visible chrome, so it stays to four controls. -->
-    <div id="toolbar" class="drag-handle" role="toolbar" aria-label="cue">
+    <div id="toolbar" class="drag-handle" role="toolbar" aria-label="voicegoat">
       <button class="tb-grip" id="grip-btn" data-i18n-title="toolbar.move" tabindex="-1" aria-hidden="true"></button>
       <button class="tb-logo" id="logo-btn" data-i18n-title="toolbar.guide"></button>
       <div class="tb-divider" role="separator"></div>
@@ -136,17 +136,20 @@
         <div class="s-group" data-search="provider openai anthropic gemini ollama groq minimax azure custom">
           <h3 class="s-label" data-i18n="settings.provider"></h3>
           <div class="s-seg s-seg-wrap" id="provider-seg" role="radiogroup">
-            <button data-provider="openai" role="radio" aria-checked="true">OpenAI</button>
+            <button data-provider="ollama" role="radio" aria-checked="true" data-i18n="settings.stt.local"></button>
+            <button data-provider="claudecode" role="radio" aria-checked="false">Claude Code</button>
+            <button data-provider="openai" role="radio" aria-checked="false">OpenAI</button>
             <button data-provider="anthropic" role="radio" aria-checked="false">Anthropic</button>
             <button data-provider="gemini" role="radio" aria-checked="false">Gemini</button>
             <button data-provider="groq" role="radio" aria-checked="false">Groq</button>
-            <button data-provider="ollama" role="radio" aria-checked="false">Ollama</button>
             <button data-provider="minimax" role="radio" aria-checked="false">MiniMax</button>
             <button data-provider="azure" role="radio" aria-checked="false">Azure</button>
             <button data-provider="custom" role="radio" aria-checked="false">Custom</button>
           </div>
           <p class="s-note" data-i18n="settings.provider.hint"></p>
         </div>
+
+        <div class="s-group" id="local-panel" data-search="local ollama model download offline llama qwen"></div>
 
         <!-- Only the selected provider's credential is shown. Nine key fields
              where one is relevant was the single densest screen in the app. -->
@@ -356,6 +359,7 @@
       <h2 class="ob-title" id="ob-title"></h2>
       <div class="ob-body" id="ob-body"></div>
       <div class="ob-checks" id="ob-checks"></div>
+      <div class="ob-local" id="ob-local"></div>
       <div class="ob-buttons" id="ob-buttons"></div>
       <div class="ob-actions">
         <button id="ob-skip" class="ghost" data-i18n="ob.skip"></button>
@@ -367,7 +371,7 @@
   </div>
 
   <!-- Assistant access request. Shown in-window rather than as a native dialog:
-       cue hides its dock icon, so an OS panel never comes forward and cannot be
+       voicegoat hides its dock icon, so an OS panel never comes forward and cannot be
        clicked. -->
   <div id="consent-scrim" class="scrim hidden">
     <div id="consent" class="glass" role="dialog" aria-modal="true" aria-labelledby="cs-title">

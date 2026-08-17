@@ -2,6 +2,7 @@
 // stream({ system, turns:[{role,text}], imageDataUrl, maxTokens, onToken }) -> Promise<fullText>
 
 const { createCompatibleClientOptions } = require('./openai-compatible');
+const claudeCode = require('./claude-code');
 
 const CUSTOM_PROVIDER = 'custom';
 // gemini-2.0-flash was Google's default here until it was deprecated (Feb 2026)
@@ -17,7 +18,10 @@ const DEFAULT_MODELS = {
   ollama: 'llama3.2',
   groq: 'llama-3.1-8b-instant',
   minimax: 'MiniMax-M2.7',
-  azure: 'gpt-4o-mini'
+  azure: 'gpt-4o-mini',
+  // Empty means "whatever the CLI is configured to use" — the subscription
+  // already has a model chosen, and overriding it here would be presumptuous.
+  claudecode: ''
 };
 
 // Gemini model ids that Google has since deprecated/retired. A settings file
@@ -26,7 +30,7 @@ const DEFAULT_MODELS = {
 // otherwise an existing user would keep re-hitting the same 404 forever.
 const DEAD_GEMINI_MODEL_RE = /^gemini-(1\.0|1\.5|2\.0)(?:-|$)/i;
 
-const PROVIDER_LABELS = { azure: 'Azure AI Foundry', openai: 'OpenAI', minimax: 'MiniMax' };
+const PROVIDER_LABELS = { azure: 'Azure AI Foundry', openai: 'OpenAI', minimax: 'MiniMax', claudecode: 'Claude Code', ollama: 'Ollama' };
 
 function normalizeProviderName(provider) {
   if (!provider) return 'provider';
@@ -334,6 +338,12 @@ function createLLM(settings) {
     if (!model && !configurationError) {
       configurationError = 'Set a Fast or Smart model for the Custom provider.';
     }
+  } else if (provider === 'claudecode') {
+    // Authentication belongs to the CLI and its subscription, so the only
+    // question here is whether the command exists at all.
+    if (!claudeCode.isAvailable()) {
+      configurationError = 'The claude command was not found. Install Claude Code, then sign in with `claude` once.';
+    }
   } else if (provider !== 'ollama' && !apiKey) {
     // Ollama is a local server: the field holds a URL, and no key is required.
     configurationError = `Add your ${provider} API key in Settings.`;
@@ -344,7 +354,7 @@ function createLLM(settings) {
     configurationError = 'Add your Azure AI Foundry endpoint in Settings.';
   }
 
-  const ready = !configurationError && !!model;
+  const ready = !configurationError && (!!model || provider === 'claudecode');
   const maxTokens = settings.smart ? 1400 : 700;
 
   return {
@@ -363,6 +373,7 @@ function createLLM(settings) {
         if (provider === 'anthropic') return await streamAnthropic(args);
         if (provider === 'gemini') return await streamGemini(args);
         if (provider === 'azure') return await streamAzure(args);
+        if (provider === 'claudecode') return await claudeCode.stream(args);
         throw new Error('unknown provider: ' + provider);
       } catch (error) {
         throw new Error(formatProviderErrorMessage(error, provider, model));

@@ -15,6 +15,7 @@ const EVENT_CHANNELS = [
   'hide:toggle',
   'whisper:download-progress', 'whisper:models-changed',
   'shortcuts:state',
+  'local:pull-progress', 'local:install-progress', 'local:models-changed',
   'app:confirm-quit',
   'settings:show', 'onboard:show'
 ];
@@ -33,6 +34,15 @@ contextBridge.exposeInMainWorld('cue', {
   stopAnswer: () => ipcRenderer.send('llm:stop'),
   refineAnswer: (kind) => ipcRenderer.send('llm:refine', { kind }),
   testProvider: (settings) => ipcRenderer.invoke('provider:test', settings),
+  localStatus: () => ipcRenderer.invoke('local:status'),
+  localStart: () => ipcRenderer.invoke('local:start'),
+  localInstall: () => ipcRenderer.invoke('local:install'),
+  localPull: (model) => ipcRenderer.invoke('local:pull', model),
+  localCancel: () => ipcRenderer.send('local:cancel'),
+  localRemove: (model) => ipcRenderer.invoke('local:remove', model),
+  localCapabilities: () => ipcRenderer.invoke('local:capabilities'),
+  localWarm: () => ipcRenderer.invoke('local:warm'),
+  claudeCodeStatus: () => ipcRenderer.invoke('claudecode:status'),
   captureToggle: () => ipcRenderer.invoke('capture:toggle').catch((err) => {
     console.error('[cue] captureToggle error', err);
     return false;

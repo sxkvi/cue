@@ -12,6 +12,8 @@ const { createStreamingSTT } = require('./src/stt-streaming');
 const { AdaptiveVAD, AudioRingBuffer } = require('./src/vad');
 const { buildInterviewContext, detectCategory } = require('./src/interview-context');
 const { startAppLink, stopAppLink, recordEvent, appLinkConsentState, revokeAppLinkCaller } = require('./src/applink');
+const ollama = require('./src/ollama');
+const claudeCode = require('./src/claude-code');
 
 // macOS system-audio loopback (the "them" channel via getDisplayMedia) does not
 // start on Electron 31–38 unless these Chromium features are enabled; without
@@ -55,6 +57,9 @@ let activeAbort = null;
 // "more detail" have something to work from.
 let lastRun = null;      // { mode, userText }
 let lastAnswer = '';
+// The in-flight model download, so it can be cancelled from the same button
+// that started it.
+let activePull = null;
 
 // -------- capture / transcript state --------
 const state = { capturing: false, busy: false, transcribing: { you: false, them: false } };
@@ -292,7 +297,7 @@ function createWindow() {
     }
   });
   win.webContents.on('render-process-gone', (_e, d) => {
-    console.log('[cue] renderer gone', JSON.stringify(d));
+    console.log('[voicegoat] renderer gone', JSON.stringify(d));
     recordEvent({ level: 'fatal', event: 'renderer_gone', code: d && d.reason, msg: 'renderer process ended: ' + JSON.stringify(d), frame: 'BrowserWindow' });
   });
 }
@@ -457,7 +462,7 @@ async function setCapturing(active) {
       try {
         await startLocalWhisper(settings);
         state.capturing = true;
-        console.log('[cue] capture started, mode: local');
+        console.log('[voicegoat] capture started, mode: local');
         send('capture:state', { active: true, streaming: false, mode: 'local' });
         return true;
       } catch (error) {
@@ -481,7 +486,8 @@ async function setCapturing(active) {
     if (!streaming) {
       startFlushLoop();
     }
-    console.log('[cue] capture started, mode:', streaming ? 'streaming' : 'batch');
+    warmLocalModelIfNeeded();
+    console.log('[voicegoat] capture started, mode:', streaming ? 'streaming' : 'batch');
     refreshTray();
     send('capture:state', { active: true, streaming: streamingMode, mode: streaming ? 'streaming' : 'batch' });
     return true;
@@ -622,16 +628,16 @@ async function runFeature(mode, userText, options = {}) {
 // The tray is the way back in, and the one place quitting is always possible.
 const TRAY_STRINGS = {
   en: {
-    show: 'Show cue', hide: 'Hide cue',
+    show: 'Show voicegoat', hide: 'Hide voicegoat',
     listen: 'Start listening', stopListening: 'Stop listening',
     settings: 'Settings…', export: 'Export conversation…',
-    guide: 'Open the guide', quit: 'Quit cue'
+    guide: 'Open the guide', quit: 'Quit voicegoat'
   },
   fr: {
-    show: 'Afficher cue', hide: 'Masquer cue',
+    show: 'Afficher voicegoat', hide: 'Masquer voicegoat',
     listen: 'Commencer à écouter', stopListening: 'Arrêter d’écouter',
     settings: 'Réglages…', export: 'Exporter la conversation…',
-    guide: 'Ouvrir le guide', quit: 'Quitter cue'
+    guide: 'Ouvrir le guide', quit: 'Quitter voicegoat'
   }
 };
 function trayStrings() {
@@ -663,14 +669,14 @@ function buildTrayMenu() {
 function refreshTray() {
   if (!tray || tray.isDestroyed()) return;
   tray.setContextMenu(buildTrayMenu());
-  tray.setToolTip(state.capturing ? 'cue — ' + trayStrings().stopListening : 'cue');
+  tray.setToolTip(state.capturing ? 'voicegoat — ' + trayStrings().stopListening : 'voicegoat');
 }
 
 function createTray() {
   if (tray) return;
   const image = nativeImage.createFromPath(path.join(__dirname, 'src', 'assets', 'trayTemplate.png'));
   if (image.isEmpty()) {
-    console.log('[cue] tray icon missing — menu-bar entry not created');
+    console.log('[voicegoat] tray icon missing — menu-bar entry not created');
     return;
   }
   image.setTemplateImage(true);
@@ -693,7 +699,7 @@ function requestQuit() {
 // -------- transcript export --------
 function transcriptAsMarkdown() {
   const stamp = new Date().toISOString().slice(0, 16).replace('T', ' ');
-  const lines = ['# cue — conversation', '', '_' + stamp + '_', ''];
+  const lines = ['# voicegoat — conversation', '', '_' + stamp + '_', ''];
   for (const turn of transcript) {
     const time = new Date(turn.ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     lines.push('**' + (turn.channel === 'them' ? 'Them' : 'You') + '** _(' + time + ')_  ');
@@ -704,7 +710,7 @@ function transcriptAsMarkdown() {
 
 async function exportTranscript() {
   if (!transcript.length) return { cancelled: true, empty: true };
-  const suggested = 'cue-conversation-' + new Date().toISOString().slice(0, 10) + '.md';
+  const suggested = 'voicegoat-conversation-' + new Date().toISOString().slice(0, 10) + '.md';
   const result = await dialog.showSaveDialog(win && !win.isDestroyed() ? win : undefined, {
     defaultPath: path.join(app.getPath('documents'), suggested),
     filters: [{ name: 'Markdown', extensions: ['md'] }, { name: 'Text', extensions: ['txt'] }]
@@ -849,6 +855,97 @@ ipcMain.on('window:nudge', (_e, delta) => {
 });
 
 ipcMain.handle('shortcuts:state', () => shortcutSnapshot());
+
+// -------- running a model on this machine --------
+// Everything here exists so that "use a local AI" is something the app can walk
+// someone through, rather than a setting that assumes a server they were
+// supposed to install first.
+function ollamaBaseUrl(settings) {
+  return (settings || store.getSettings()).apiKeys.ollama || ollama.DEFAULT_BASE_URL;
+}
+
+ipcMain.handle('local:status', async () => {
+  const settings = store.getSettings();
+  const state = await ollama.listModels(ollamaBaseUrl(settings));
+  return {
+    ...state,
+    installed: ollama.isInstalled(),
+    canInstall: !!ollama.findBinary('brew'),
+    selected: (settings.models.ollama || {}).fast || ''
+  };
+});
+
+// Starting the server is separate from installing it: the usual reason nothing
+// answers is that Ollama is present but not running.
+ipcMain.handle('local:start', () => ollama.startServer(ollamaBaseUrl()));
+
+ipcMain.handle('local:install', async () => {
+  const result = await ollama.install({
+    onOutput: (line) => send('local:install-progress', { line })
+  });
+  if (!result.ok) return result;
+  const started = await ollama.startServer(ollamaBaseUrl());
+  return { ...result, running: started.running };
+});
+
+ipcMain.handle('local:pull', async (_event, model) => {
+  if (activePull) return { ok: false, message: 'A download is already running.' };
+  const controller = new AbortController();
+  activePull = { model, controller };
+  try {
+    await ollama.pullModel(ollamaBaseUrl(), model, {
+      signal: controller.signal,
+      onProgress: (progress) => send('local:pull-progress', progress)
+    });
+    send('local:models-changed', { model });
+    return { ok: true, model };
+  } catch (error) {
+    if (controller.signal.aborted) return { ok: false, cancelled: true };
+    return { ok: false, message: (error && error.message) || String(error) };
+  } finally {
+    activePull = null;
+  }
+});
+
+ipcMain.on('local:cancel', () => { if (activePull) activePull.controller.abort(); });
+
+ipcMain.handle('local:remove', async (_event, model) => {
+  try {
+    await ollama.removeModel(ollamaBaseUrl(), model);
+    send('local:models-changed', { model });
+    return { ok: true };
+  } catch (error) {
+    return { ok: false, message: error.message };
+  }
+});
+
+// Which of the on-screen actions the chosen model can actually serve. Assist
+// and Solve screen send an image; a text-only model cannot answer them, and
+// saying so up front beats letting the buttons fail.
+ipcMain.handle('local:capabilities', async () => {
+  const settings = store.getSettings();
+  if (settings.provider === 'claudecode') return { vision: true, provider: 'claudecode' };
+  if (settings.provider !== 'ollama') return { vision: true, provider: settings.provider };
+  const model = (settings.models.ollama || {})[settings.smart ? 'smart' : 'fast'];
+  if (!model) return { vision: false, provider: 'ollama', model: '' };
+  return { vision: await ollama.supportsVision(ollamaBaseUrl(settings), model), provider: 'ollama', model };
+});
+
+// Kept warm rather than warmed on demand: see warmModel's note on what the
+// first question otherwise costs.
+function warmLocalModelIfNeeded() {
+  const settings = store.getSettings();
+  if (settings.provider !== 'ollama') return;
+  const model = (settings.models.ollama || {})[settings.smart ? 'smart' : 'fast'];
+  if (!model) return;
+  ollama.warmModel(ollamaBaseUrl(settings), model).catch(() => {});
+}
+ipcMain.handle('local:warm', () => { warmLocalModelIfNeeded(); return { ok: true }; });
+
+ipcMain.handle('claudecode:status', async () => ({
+  available: claudeCode.isAvailable(),
+  version: claudeCode.isAvailable() ? await claudeCode.version() : null
+}));
 ipcMain.on('app:request-quit', () => requestQuit());
 ipcMain.on('mic:pcm', (_e, arrayBuffer) => { if (state.capturing) routeAudio('you', arrayBuffer); });
 ipcMain.on('system:pcm', (_e, arrayBuffer) => { if (state.capturing) routeAudio('them', arrayBuffer); });
@@ -943,9 +1040,9 @@ function registerShortcuts() {
 const DISGUISE_NAME = 'Microsoft Edge Update';
 function applyDisguise(settings) {
   const disguised = settings.disguiseProcess !== false;
-  app.setName(disguised ? 'MicrosoftEdgeUpdate' : 'cue');
-  if (isWindows) process.title = disguised ? 'MicrosoftEdgeUpdate' : 'cue';
-  if (win && !win.isDestroyed()) win.setTitle(disguised ? DISGUISE_NAME : 'cue');
+  app.setName(disguised ? 'MicrosoftEdgeUpdate' : 'voicegoat');
+  if (isWindows) process.title = disguised ? 'MicrosoftEdgeUpdate' : 'voicegoat';
+  if (win && !win.isDestroyed()) win.setTitle(disguised ? DISGUISE_NAME : 'voicegoat');
 }
 
 // -------- permissions --------
@@ -1069,6 +1166,7 @@ function launchApp() {
   createWindow();
   registerShortcuts();
   createTray();
+  warmLocalModelIfNeeded();
 }
 
 // -------- lifecycle --------
