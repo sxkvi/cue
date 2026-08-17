@@ -243,7 +243,12 @@ function createWindow() {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: false
+      sandbox: false,
+      // This window is shown without focus and stays that way, so Electron
+      // treats it as backgrounded and throttles its timers and animation
+      // frames. For an overlay that has to respond while another app is in
+      // front, that is never the right trade.
+      backgroundThrottling: false
     }
   };
 
@@ -687,14 +692,21 @@ function createTray() {
 // -------- quitting --------
 // Quitting throws away everything cue has heard, and the quit shortcut sits one
 // key away from the hide shortcut, so it asks first unless told not to.
+let quitConfirmTimer = null;
 function requestQuit() {
   const settings = store.getSettings();
-  if (settings.confirmQuit && win && !win.isDestroyed()) {
-    send('app:confirm-quit', {});
+  if (!settings.confirmQuit || !win || win.isDestroyed()) {
+    app.quit();
     return;
   }
-  app.quit();
+  send('app:confirm-quit', {});
+  // Quitting must never depend on the window being usable. If the renderer does
+  // not report the dialog on screen, main quits anyway — the alternative is an
+  // overlay that can only be closed from Activity Monitor.
+  clearTimeout(quitConfirmTimer);
+  quitConfirmTimer = setTimeout(() => app.quit(), 3000);
 }
+ipcMain.on('app:confirm-quit-shown', () => clearTimeout(quitConfirmTimer));
 
 // -------- transcript export --------
 function transcriptAsMarkdown() {

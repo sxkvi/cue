@@ -61,6 +61,7 @@ contextBridge.exposeInMainWorld('cue', {
   appLinkConsentRespond: (id, allowed) => ipcRenderer.send('applink:consent-response', { id, allowed }),
   pickProfileDocument: () => ipcRenderer.invoke('profile:pickDocument'),
   requestQuit: () => ipcRenderer.send('app:request-quit'),
+  confirmQuitShown: () => ipcRenderer.send('app:confirm-quit-shown'),
   quit: () => ipcRenderer.send('app:quit'),
   permissionsCheck: () => ipcRenderer.invoke('permissions:check'),
   permissionsRequest: () => ipcRenderer.invoke('permissions:request'),

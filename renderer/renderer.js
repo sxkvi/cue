@@ -1888,6 +1888,10 @@
     quitScrim.classList.remove('hidden');
     setIgnore(false);
     trapFocus($('#quit-dialog'));
+    // Tells main the dialog is really on screen. Without this acknowledgement
+    // main quits by itself, so a renderer that cannot show the dialog can never
+    // trap the user inside a running app.
+    cue.confirmQuitShown();
   }
   function hideQuitDialog() { quitScrim.classList.add('hidden'); releaseFocus(); }
   $('#quit-cancel').addEventListener('click', hideQuitDialog);
@@ -1951,20 +1955,29 @@
     ignoring = value;
     cue.setIgnoreMouse(value);
   }
-  // Throttled to one test per frame: this used to run elementFromPoint on every
-  // mousemove event, which is a layout read per event.
-  let pendingPoint = null;
+  // Tested synchronously, on purpose. Deferring this to requestAnimationFrame
+  // locked the window: it starts click-through, only a hit test can make it
+  // interactive again, and Electron suspends animation frames for a window it
+  // considers backgrounded — which this one always is, because it is shown
+  // without focus. The frame never arrived, the pending flag stayed set so no
+  // further frame was ever requested, and nothing on screen could be clicked
+  // again, quitting included.
+  //
+  // A distance guard is all the throttling this needs: sub-pixel jitter is
+  // skipped, and any real movement is re-tested immediately with no scheduling
+  // in the path that can stall.
+  let lastX = -1;
+  let lastY = -1;
+  function hitTest(x, y) {
+    lastX = x; lastY = y;
+    const element = document.elementFromPoint(x, y);
+    setIgnore(!(element && element.closest && element.closest(UI_SELECTOR)));
+  }
   document.addEventListener('mousemove', (event) => {
-    const first = pendingPoint === null;
-    pendingPoint = { x: event.clientX, y: event.clientY };
-    if (!first) return;
-    requestAnimationFrame(() => {
-      const point = pendingPoint;
-      pendingPoint = null;
-      if (!point) return;
-      const element = document.elementFromPoint(point.x, point.y);
-      setIgnore(!(element && element.closest && element.closest(UI_SELECTOR)));
-    });
+    const x = event.clientX;
+    const y = event.clientY;
+    if (Math.abs(x - lastX) < 2 && Math.abs(y - lastY) < 2) return;
+    hitTest(x, y);
   });
   setIgnore(true);
 
