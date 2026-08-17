@@ -20,7 +20,7 @@ const EVENT_CHANNELS = [
   'settings:show', 'onboard:show'
 ];
 
-contextBridge.exposeInMainWorld('cue', {
+contextBridge.exposeInMainWorld('voicegoat', {
   platform,
   settingsGet: () => ipcRenderer.invoke('settings:get'),
   settingsSet: (patch) => ipcRenderer.invoke('settings:set', patch),

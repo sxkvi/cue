@@ -1,12 +1,12 @@
-/* cue renderer — UI state, audio capture, IPC, streaming render. */
+/* voicegoat renderer — UI state, audio capture, IPC, streaming render. */
 (function () {
   const { icon } = window.ICONS;
   const { renderMarkdown } = window.CUE_MARKDOWN;
   const t = (key, vars) => window.i18n.t(key, vars);
-  const cue = window.cue;
+  const voicegoat = window.voicegoat;
   const $ = (s) => document.querySelector(s);
   const $$ = (s) => Array.from(document.querySelectorAll(s));
-  const isWindows = cue.platform === 'win32';
+  const isWindows = voicegoat.platform === 'win32';
 
   const MOD = isWindows ? 'Ctrl' : '⌘';
   const SHIFT = isWindows ? 'Shift' : '⇧';
@@ -15,7 +15,7 @@
 
   // ---- state -------------------------------------------------------------
   let settings = null;
-  let platformInfo = { platform: cue.platform, systemLocale: 'en', shortcuts: { registered: {}, combos: {} } };
+  let platformInfo = { platform: voicegoat.platform, systemLocale: 'en', shortcuts: { registered: {}, combos: {} } };
   let whisperOverview = null;
   let busy = false;
   let capturing = false;
@@ -68,10 +68,10 @@
   // ======================================================================
   let statusTimer = null;
   function showStatus(message, action) {
-    let el = $('#cue-status');
+    let el = $('#voicegoat-status');
     if (!el) {
       el = document.createElement('div');
-      el.id = 'cue-status';
+      el.id = 'voicegoat-status';
       el.className = 'status-note';
       $('#panel').insertBefore(el, $('#action-row'));
     }
@@ -242,9 +242,9 @@
           text.textContent = t('answer.copy');
         }, 1600);
       }),
-      actionButton('refresh-cw', 'answer.regenerate', () => { if (!busy) cue.refineAnswer('retry'); }),
-      actionButton('fold', 'answer.shorter', () => { if (!busy) cue.refineAnswer('shorter'); }),
-      actionButton('unfold', 'answer.longer', () => { if (!busy) cue.refineAnswer('longer'); })
+      actionButton('refresh-cw', 'answer.regenerate', () => { if (!busy) voicegoat.refineAnswer('retry'); }),
+      actionButton('fold', 'answer.shorter', () => { if (!busy) voicegoat.refineAnswer('shorter'); }),
+      actionButton('unfold', 'answer.longer', () => { if (!busy) voicegoat.refineAnswer('longer'); })
     );
     group.appendChild(actions);
     // Copy is why this screen exists, so it must not finish its life below the
@@ -272,7 +272,7 @@
     group.querySelectorAll('a[data-external]').forEach((anchor) => {
       anchor.addEventListener('click', (event) => {
         event.preventDefault();
-        cue.openPane(anchor.getAttribute('href'));
+        voicegoat.openPane(anchor.getAttribute('href'));
       });
     });
   }
@@ -456,7 +456,7 @@
   function run(mode, text) {
     if (busy) return;
     setBusy(true);
-    cue.ask({ mode, text: text || '' });
+    voicegoat.ask({ mode, text: text || '' });
   }
 
   // ======================================================================
@@ -481,7 +481,7 @@
       });
       // getUserMedia can hand back a stream with no usable track — a virtual
       // device, or one unplugged between the grant and the capture. Failing
-      // loudly here beats the "cue never hears me and says nothing" symptom.
+      // loudly here beats the "voicegoat never hears me and says nothing" symptom.
       const [track] = micStream.getAudioTracks();
       if (!track) {
         micStream.getTracks().forEach((t) => t.stop());
@@ -489,35 +489,35 @@
         showStatus(t('err.mic.notrack'));
         return;
       }
-      cue.log('mic started: ' + (track.label || '(no label — permission may be stale)'));
+      voicegoat.log('mic started: ' + (track.label || '(no label — permission may be stale)'));
       audioCtx = new AudioContext({ sampleRate: 16000 });
       try {
         await audioCtx.audioWorklet.addModule('audio-worklet-processor.js');
         const source = audioCtx.createMediaStreamSource(micStream);
-        micWorklet = new AudioWorkletNode(audioCtx, 'cue-audio-processor');
-        micWorklet.port.onmessage = (e) => cue.micPcm(e.data);
+        micWorklet = new AudioWorkletNode(audioCtx, 'voicegoat-audio-processor');
+        micWorklet.port.onmessage = (e) => voicegoat.micPcm(e.data);
         source.connect(micWorklet);
       } catch (workletError) {
-        cue.log('AudioWorklet unavailable, using ScriptProcessor: ' + workletError.message);
+        voicegoat.log('AudioWorklet unavailable, using ScriptProcessor: ' + workletError.message);
         const node = audioCtx.createMediaStreamSource(micStream);
         const proc = audioCtx.createScriptProcessor(4096, 1, 1);
         const sink = audioCtx.createGain(); sink.gain.value = 0;
         node.connect(proc); proc.connect(sink); sink.connect(audioCtx.destination);
-        proc.onaudioprocess = (e) => cue.micPcm(pcmFromFloat(e.inputBuffer.getChannelData(0)));
+        proc.onaudioprocess = (e) => voicegoat.micPcm(pcmFromFloat(e.inputBuffer.getChannelData(0)));
         micWorklet = { _legacy: true, proc, node, sink };
       }
     } catch (err) {
       // DOMException.name is the reliable signal; .message wording moves between
       // Chromium versions. Three names mean three different things to do next.
       const name = err && err.name;
-      cue.log('mic error: ' + name + ' — ' + (err && err.message));
+      voicegoat.log('mic error: ' + name + ' — ' + (err && err.message));
       if (name === 'NotFoundError' || name === 'DevicesNotFoundError') showStatus(t('err.mic.none'));
       else if (name === 'NotAllowedError' || name === 'PermissionDeniedError' || name === 'SecurityError') {
         showStatus(t(isWindows ? 'err.mic.denied.win' : 'err.mic.denied.mac'), {
           label: t('ob.perms.open'),
-          run: () => cue.openPane(isWindows
+          run: () => voicegoat.openPane(isWindows
             ? 'ms-settings:privacy-microphone'
-            : 'x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone')
+            : 'x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?Privacy_Microphone')
         });
       } else if (name === 'NotReadableError' || name === 'TrackStartError') showStatus(t('err.mic.busy'));
       else showStatus(t('err.mic.generic'));
@@ -562,19 +562,19 @@
       try {
         await sysCtx.audioWorklet.addModule('audio-worklet-processor.js');
         const source = sysCtx.createMediaStreamSource(new MediaStream(tracks));
-        sysWorklet = new AudioWorkletNode(sysCtx, 'cue-audio-processor');
-        sysWorklet.port.onmessage = (e) => cue.systemPcm(e.data);
+        sysWorklet = new AudioWorkletNode(sysCtx, 'voicegoat-audio-processor');
+        sysWorklet.port.onmessage = (e) => voicegoat.systemPcm(e.data);
         source.connect(sysWorklet);
       } catch (workletError) {
         const node = sysCtx.createMediaStreamSource(new MediaStream(tracks));
         const proc = sysCtx.createScriptProcessor(4096, 1, 1);
         const sink = sysCtx.createGain(); sink.gain.value = 0;
         node.connect(proc); proc.connect(sink); sink.connect(sysCtx.destination);
-        proc.onaudioprocess = (e) => cue.systemPcm(pcmFromFloat(e.inputBuffer.getChannelData(0)));
+        proc.onaudioprocess = (e) => voicegoat.systemPcm(pcmFromFloat(e.inputBuffer.getChannelData(0)));
         sysWorklet = { _legacy: true, proc, node, sink };
       }
     } catch (err) {
-      cue.log('system audio error: ' + (err && err.message));
+      voicegoat.log('system audio error: ' + (err && err.message));
       showStatus(t('err.sys.generic'));
     } finally {
       sysStarting = false;
@@ -598,7 +598,7 @@
     // Loopback capture needs the user gesture to still be warm, so this runs
     // before the round trip to main rather than after it.
     if (turningOn) { try { await startSystemAudio(); } catch (_) { /* mic still works */ } }
-    const active = await cue.captureToggle();
+    const active = await voicegoat.captureToggle();
     if (turningOn && !active) stopSystemAudio();
   }
 
@@ -732,7 +732,7 @@
   }
 
   async function refreshLocal() {
-    try { localState = await cue.localStatus(); }
+    try { localState = await voicegoat.localStatus(); }
     catch (_) { localState = { running: false, installed: false, models: [] }; }
     paintLocalPanels();
     refreshCapabilities();
@@ -786,7 +786,7 @@
       const cancel = document.createElement('button');
       cancel.className = 's-action';
       cancel.textContent = t('local.cancel');
-      cancel.addEventListener('click', () => cue.localCancel());
+      cancel.addEventListener('click', () => voicegoat.localCancel());
       actions.appendChild(cancel);
     } else if (model.installed) {
       if (chosen) {
@@ -805,7 +805,7 @@
       remove.className = 's-action danger';
       remove.textContent = t('local.remove');
       remove.addEventListener('click', async () => {
-        const result = await cue.localRemove(model.id);
+        const result = await voicegoat.localRemove(model.id);
         if (!result.ok) showToast(result.message, 3000);
         await refreshLocal();
       });
@@ -824,7 +824,7 @@
 
   async function selectProvider(provider) {
     settings.provider = provider;
-    settings = await cue.settingsSet({ provider });
+    settings = await voicegoat.settingsSet({ provider });
     await refreshCapabilities();
     paintSmartTooltip();
   }
@@ -832,10 +832,10 @@
   async function chooseLocalModel(id) {
     settings.provider = 'ollama';
     settings.models.ollama = { fast: id, smart: id };
-    settings = await cue.settingsSet({ provider: 'ollama', models: { ollama: { fast: id, smart: id } } });
+    settings = await voicegoat.settingsSet({ provider: 'ollama', models: { ollama: { fast: id, smart: id } } });
     // Load it now, while the user is still reading, rather than on their first
     // real question.
-    cue.localWarm();
+    voicegoat.localWarm();
     paintLocalPanels();
     await refreshCapabilities();
     paintSmartTooltip();
@@ -844,7 +844,7 @@
   async function startPull(id) {
     pulling = id;
     paintLocalPanels();
-    const result = await cue.localPull(id);
+    const result = await voicegoat.localPull(id);
     pulling = null;
     if (result && result.ok) {
       // Downloading a model and then not using it is never what was meant.
@@ -885,7 +885,7 @@
         install.addEventListener('click', async () => {
           installing = true;
           paintLocalPanels();
-          const result = await cue.localInstall();
+          const result = await voicegoat.localInstall();
           installing = false;
           if (!result.ok) showToast(result.message || t('local.manual'), 4000);
           await refreshLocal();
@@ -899,7 +899,7 @@
         const open = document.createElement('button');
         open.className = 's-action';
         open.textContent = t('local.install');
-        open.addEventListener('click', () => cue.openPane('https://ollama.com/download'));
+        open.addEventListener('click', () => voicegoat.openPane('https://ollama.com/download'));
         actions.appendChild(open);
       }
       host.appendChild(actions);
@@ -921,7 +921,7 @@
       start.addEventListener('click', async () => {
         start.disabled = true;
         start.textContent = t('local.starting');
-        await cue.localStart();
+        await voicegoat.localStart();
         await refreshLocal();
       });
       host.append(note, start);
@@ -959,7 +959,7 @@
   let visionAvailable = true;
   async function refreshCapabilities() {
     try {
-      const capabilities = await cue.localCapabilities();
+      const capabilities = await voicegoat.localCapabilities();
       visionAvailable = capabilities.vision !== false;
       applyVisionGating(capabilities);
     } catch (_) { /* leave the actions enabled rather than guessing */ }
@@ -981,7 +981,7 @@
     $('#action-row').insertAdjacentElement('afterend', created);
   }
 
-  cue.on('local:pull-progress', (progress) => {
+  voicegoat.on('local:pull-progress', (progress) => {
     const bar = document.querySelector('.lm-progress');
     if (!bar) return;
     const meter = bar.querySelector('progress');
@@ -994,14 +994,14 @@
     meter.value = progress.percent;
     label.textContent = t('local.downloading', { percent: progress.percent, total: bytesLabel(progress.total) });
   });
-  cue.on('local:install-progress', ({ line }) => {
+  voicegoat.on('local:install-progress', ({ line }) => {
     const log = $('#local-install-log');
     if (!log) return;
     log.hidden = false;
     log.textContent = (log.textContent + '\n' + line).split('\n').slice(-6).join('\n');
     log.scrollTop = log.scrollHeight;
   });
-  cue.on('local:models-changed', () => refreshLocal());
+  voicegoat.on('local:models-changed', () => refreshLocal());
 
   // ======================================================================
   //  Settings
@@ -1060,7 +1060,7 @@
 
     const help = $('#key-help-link');
     help.hidden = !meta.url;
-    help.onclick = (event) => { event.preventDefault(); cue.openPane(meta.url); };
+    help.onclick = (event) => { event.preventDefault(); voicegoat.openPane(meta.url); };
 
     $('#key-storage-note').textContent = settings.secureStorage
       ? t('settings.key.stored')
@@ -1145,7 +1145,7 @@
     host.append(title, why);
 
     let status = { available: false, version: null };
-    try { status = await cue.claudeCodeStatus(); } catch (_) { /* treated as missing */ }
+    try { status = await voicegoat.claudeCodeStatus(); } catch (_) { /* treated as missing */ }
 
     const badge = document.createElement('span');
     badge.className = 's-badge ' + (status.available ? 'ready' : 'error');
@@ -1158,7 +1158,7 @@
       const get = document.createElement('button');
       get.className = 's-action';
       get.textContent = t('claudecode.get');
-      get.addEventListener('click', () => cue.openPane('https://claude.com/claude-code'));
+      get.addEventListener('click', () => voicegoat.openPane('https://claude.com/claude-code'));
       host.appendChild(get);
     }
 
@@ -1411,7 +1411,7 @@
     settings.shortcuts = shortcuts;
 
     try {
-      settings = await cue.settingsSet(settings);
+      settings = await voicegoat.settingsSet(settings);
       applyPreferences();
       $('#s-status').textContent = statusLine();
       paintPrepStatus();
@@ -1426,9 +1426,9 @@
 
   async function fillAppLinkCallers() {
     const host = $('#applink-callers');
-    if (!host || !cue.appLinkState) return;
+    if (!host || !voicegoat.appLinkState) return;
     let state;
-    try { state = await cue.appLinkState(); } catch (_) { return; }
+    try { state = await voicegoat.appLinkState(); } catch (_) { return; }
     const callers = Object.entries((state && state.callers) || {});
     if (!callers.length) {
       host.innerHTML = '';
@@ -1454,7 +1454,7 @@
       forget.className = 's-action';
       forget.type = 'button';
       forget.textContent = t('settings.access.forget');
-      forget.addEventListener('click', async () => { await cue.appLinkRevoke(id); fillAppLinkCallers(); });
+      forget.addEventListener('click', async () => { await voicegoat.appLinkRevoke(id); fillAppLinkCallers(); });
       row.append(label, forget);
       host.appendChild(row);
     }
@@ -1536,7 +1536,7 @@
     const status = $('#whisper-status');
     try {
       const previous = $('#whisper-model').value || (settings.localWhisper && settings.localWhisper.modelId) || 'base.en';
-      whisperOverview = await cue.whisperModels();
+      whisperOverview = await voicegoat.whisperModels();
       const badge = $('#whisper-runtime-status');
       badge.classList.toggle('ready', whisperOverview.runtime.available);
       badge.classList.toggle('error', !whisperOverview.runtime.available);
@@ -1681,18 +1681,18 @@
   // ======================================================================
   $$('.act').forEach((button) => button.addEventListener('click', () => run(button.dataset.mode)));
   $('#send-btn').addEventListener('click', send);
-  $('#stop-answer-btn').addEventListener('click', () => cue.stopAnswer());
+  $('#stop-answer-btn').addEventListener('click', () => voicegoat.stopAnswer());
   $('#stop-btn').addEventListener('click', toggleListening);
   $('#history-btn').addEventListener('click', () => toggleRail());
   $('#close-rail-btn').addEventListener('click', () => toggleRail(false));
   $('#more-btn').addEventListener('click', () => openSettings());
   $('#logo-btn').addEventListener('click', showOnboard);
-  $('#quit-btn').addEventListener('click', () => cue.requestQuit());
+  $('#quit-btn').addEventListener('click', () => voicegoat.requestQuit());
 
   $('#smart-toggle').addEventListener('click', async () => {
     settings.smart = !settings.smart;
     paintSmartTooltip();
-    settings = await cue.settingsSet({ smart: settings.smart });
+    settings = await voicegoat.settingsSet({ smart: settings.smart });
   });
 
   $('#autofill-toggle').addEventListener('click', async () => {
@@ -1701,7 +1701,7 @@
     if (!next) releaseBox();
     paintComposerState();
     showToast(t(next ? 'listen.autofill.on' : 'listen.autofill.off'));
-    settings = await cue.settingsSet({ sttAutofill: next });
+    settings = await voicegoat.settingsSet({ sttAutofill: next });
   });
 
   $$('.prep-item').forEach((chip) => chip.addEventListener('click', () => {
@@ -1725,7 +1725,7 @@
     }
     // Escape clears, but only after it has stopped a running answer.
     if (event.key === 'Escape') {
-      if (busy) { event.preventDefault(); cue.stopAnswer(); return; }
+      if (busy) { event.preventDefault(); voicegoat.stopAnswer(); return; }
       if (input.value.trim()) {
         event.preventDefault();
         remember(input.value);
@@ -1804,7 +1804,7 @@
       smart: false
     };
     try {
-      const outcome = await cue.testProvider(draft);
+      const outcome = await voicegoat.testProvider(draft);
       if (outcome && outcome.ok) {
         result.className = 's-result ok';
         result.textContent = t('settings.test.ok', { ms: outcome.ms });
@@ -1823,7 +1823,7 @@
   $('#upload-resume-btn').addEventListener('click', () => importDocument('#resume-text', '#resume-filename'));
   $('#upload-jd-btn').addEventListener('click', () => importDocument('#job-description', '#jd-filename'));
   async function importDocument(target, nameTarget) {
-    const result = await cue.pickProfileDocument();
+    const result = await voicegoat.pickProfileDocument();
     if (!result || result.canceled) return;
     if (result.error) { $('#s-status').textContent = t('settings.importFailed', { message: result.error }); return; }
     $(target).value = result.text || '';
@@ -1841,18 +1841,18 @@
     if (!model) return;
     model.downloading = true;
     paintWhisperModel();
-    try { await cue.whisperModelDownload(model.id); }
+    try { await voicegoat.whisperModelDownload(model.id); }
     catch (error) { $('#whisper-status').textContent = error.message; }
     finally { await refreshWhisperModels(); }
   });
   $('#whisper-cancel').addEventListener('click', async () => {
     const model = selectedWhisperModel();
-    if (model) await cue.whisperModelCancel(model.id);
+    if (model) await voicegoat.whisperModelCancel(model.id);
   });
   $('#whisper-import').addEventListener('click', async () => {
     const model = selectedWhisperModel();
     if (!model) return;
-    try { await cue.whisperModelImport(model.id); }
+    try { await voicegoat.whisperModelImport(model.id); }
     catch (error) { $('#whisper-status').textContent = error.message; }
     finally { await refreshWhisperModels(); }
   });
@@ -1861,13 +1861,13 @@
     if (!model) return;
     const question = t('settings.whisper.deleteConfirm', { model: model.id, size: formatBytes(model.bytes) });
     if (!window.confirm(question)) return;
-    try { await cue.whisperModelDelete(model.id); }
+    try { await voicegoat.whisperModelDelete(model.id); }
     catch (error) { $('#whisper-status').textContent = error.message; }
     finally { await refreshWhisperModels(); }
   });
 
   $('#export-transcript-btn').addEventListener('click', async () => {
-    const result = await cue.exportTranscript();
+    const result = await voicegoat.exportTranscript();
     if (!result || result.cancelled) return;
     if (result.error) { showToast(result.error, 3000); return; }
     showToast(t('transcript.exported', { file: result.fileName }), 3000);
@@ -1875,7 +1875,7 @@
 
   $('#clear-transcript-btn').addEventListener('click', async () => {
     remember(input.value);
-    await cue.clearTranscript();
+    await voicegoat.clearTranscript();
     clearRail();
     releaseBox();
     showEmptyState();
@@ -1891,15 +1891,15 @@
     // Tells main the dialog is really on screen. Without this acknowledgement
     // main quits by itself, so a renderer that cannot show the dialog can never
     // trap the user inside a running app.
-    cue.confirmQuitShown();
+    voicegoat.confirmQuitShown();
   }
   function hideQuitDialog() { quitScrim.classList.add('hidden'); releaseFocus(); }
   $('#quit-cancel').addEventListener('click', hideQuitDialog);
-  $('#quit-confirm').addEventListener('click', () => cue.quit());
+  $('#quit-confirm').addEventListener('click', () => voicegoat.quit());
   $('#quit-export').addEventListener('click', async () => {
-    const result = await cue.exportTranscript();
+    const result = await voicegoat.exportTranscript();
     if (result && result.cancelled) return;   // a cancelled save must not quit
-    cue.quit();
+    voicegoat.quit();
   });
   quitScrim.addEventListener('click', (event) => { if (event.target === quitScrim) hideQuitDialog(); });
 
@@ -1908,7 +1908,7 @@
   let pendingConsentId = null;
   function answerConsent(allowed) {
     if (!pendingConsentId) return;
-    cue.appLinkConsentRespond(pendingConsentId, allowed);
+    voicegoat.appLinkConsentRespond(pendingConsentId, allowed);
     pendingConsentId = null;
     consentScrim.classList.add('hidden');
     releaseFocus();
@@ -1941,7 +1941,7 @@
       const delta = deltas[event.key];
       if (delta) {
         event.preventDefault();
-        cue.nudgeWindow(delta[0], delta[1], event.shiftKey ? 96 : 24);
+        voicegoat.nudgeWindow(delta[0], delta[1], event.shiftKey ? 96 : 24);
       }
     }
   });
@@ -1953,7 +1953,7 @@
   function setIgnore(value) {
     if (value === ignoring) return;
     ignoring = value;
-    cue.setIgnoreMouse(value);
+    voicegoat.setIgnoreMouse(value);
   }
   // Tested synchronously, on purpose. Deferring this to requestAnimationFrame
   // locked the window: it starts click-through, only a hit test can make it
@@ -2000,13 +2000,13 @@
           id: 'mic',
           name: t('ob.perms.mic'),
           why: t('ob.perms.mic.why'),
-          open: () => cue.openPane(isWindows ? 'ms-settings:privacy-microphone' : 'x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone')
+          open: () => voicegoat.openPane(isWindows ? 'ms-settings:privacy-microphone' : 'x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?Privacy_Microphone')
         },
         !winTen && {
           id: 'screen',
           name: t('ob.perms.screen'),
           why: t('ob.perms.screen.why'),
-          open: () => cue.openPane(isWindows ? 'ms-settings:privacy-screenrecorder' : 'x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture')
+          open: () => voicegoat.openPane(isWindows ? 'ms-settings:privacy-screenrecorder' : 'x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?Privacy_ScreenCapture')
         }
       ].filter(Boolean)
     };
@@ -2051,7 +2051,7 @@
     if (!step.checks) return;
 
     let permissions = { mic: 'granted', screen: 'granted' };
-    try { permissions = await cue.permissionsCheck(); } catch (_) { /* non-mac reports granted */ }
+    try { permissions = await voicegoat.permissionsCheck(); } catch (_) { /* non-mac reports granted */ }
     // The await above can outlive the step that started it.
     if (token !== checksToken) return;
     const hasKey = !!(settings.apiKeys && settings.apiKeys[settings.provider]);
@@ -2150,7 +2150,7 @@
     releaseFocus();
     if (settings && !settings.onboarded) {
       settings.onboarded = true;
-      settings = await cue.settingsSet({ onboarded: true });
+      settings = await voicegoat.settingsSet({ onboarded: true });
     }
   }
 
@@ -2164,7 +2164,7 @@
   // ======================================================================
   //  Events from main
   // ======================================================================
-  cue.on('capture:state', ({ active, mode }) => {
+  voicegoat.on('capture:state', ({ active, mode }) => {
     capturing = active;
     paintListenButton();
     listenBar.classList.remove('error');
@@ -2174,58 +2174,58 @@
     paintListenBar();
     if (active && mode === 'local') $('#lb-label').textContent = t('listen.on.local');
   });
-  cue.on('capture:request-toggle', () => { void toggleListening(); });
+  voicegoat.on('capture:request-toggle', () => { void toggleListening(); });
 
-  cue.on('vad:state', ({ channel, speaking: isSpeaking }) => {
+  voicegoat.on('vad:state', ({ channel, speaking: isSpeaking }) => {
     speaking[channel] = !!isSpeaking;
     paintListenBar();
   });
-  cue.on('stt:interim', ({ channel, text }) => addRailTurn(channel, text, true));
-  cue.on('stt:final', () => { if (railInterim) { railInterim.remove(); railInterim = null; } });
-  cue.on('stt:status', ({ status, provider }) => {
-    cue.log(`[stt] ${provider || ''} ${status}`);
+  voicegoat.on('stt:interim', ({ channel, text }) => addRailTurn(channel, text, true));
+  voicegoat.on('stt:final', () => { if (railInterim) { railInterim.remove(); railInterim = null; } });
+  voicegoat.on('stt:status', ({ status, provider }) => {
+    voicegoat.log(`[stt] ${provider || ''} ${status}`);
     if (status === 'error') setListenError();
   });
-  cue.on('transcript', ({ channel, text }) => {
+  voicegoat.on('transcript', ({ channel, text }) => {
     if (!text || text.trim().length < 2 || /^[?!.,;:\-…]+$/.test(text.trim())) return;
     addRailTurn(channel, text, false);
     if (channel === 'them') { clearTimeout(clearTimer); userSpeechStart = null; fillFromSpeech(text); }
     else fadeQuestionWhileUserSpeaks();
   });
 
-  cue.on('llm:start', ({ userBubble, small, category }) => {
+  voicegoat.on('llm:start', ({ userBubble, small, category }) => {
     startAnswer({ question: userBubble, small, category });
     setBusy(true);
   });
-  cue.on('llm:token', ({ text }) => appendToken(text));
-  cue.on('llm:done', (payload) => { finishAnswer(payload || {}); setBusy(false); });
-  cue.on('llm:error', ({ message }) => {
+  voicegoat.on('llm:token', ({ text }) => appendToken(text));
+  voicegoat.on('llm:done', (payload) => { finishAnswer(payload || {}); setBusy(false); });
+  voicegoat.on('llm:error', ({ message }) => {
     if (!currentBody) startAnswer({ question: null, small: true });
     currentRaw = message;
     finishAnswer({});
     setBusy(false);
   });
 
-  cue.on('status', (payload) => {
+  voicegoat.on('status', (payload) => {
     // Main sends keys; the older shape carried English text.
     const message = payload && payload.key ? t(payload.key, payload.vars) : (payload && payload.message) || '';
     if (!message) return;
-    cue.log('[status] ' + message);
+    voicegoat.log('[status] ' + message);
     const needsKey = payload && (payload.key === 'err.nokey' || payload.key === 'err.nostt');
     showStatus(message, needsKey ? { label: t('empty.settings'), run: () => openSettings('keys') } : null);
   });
 
-  cue.on('hide:toggle', (payload) => toggleHide(payload && typeof payload.hidden === 'boolean' ? payload.hidden : undefined));
-  cue.on('settings:show', () => openSettings());
-  cue.on('onboard:show', showOnboard);
-  cue.on('app:confirm-quit', showQuitDialog);
-  cue.on('shortcuts:state', (state) => {
+  voicegoat.on('hide:toggle', (payload) => toggleHide(payload && typeof payload.hidden === 'boolean' ? payload.hidden : undefined));
+  voicegoat.on('settings:show', () => openSettings());
+  voicegoat.on('onboard:show', showOnboard);
+  voicegoat.on('app:confirm-quit', showQuitDialog);
+  voicegoat.on('shortcuts:state', (state) => {
     platformInfo.shortcuts = state;
     if (!settingsScrim.classList.contains('hidden')) paintShortcuts();
     paintStaticLabels();
   });
 
-  cue.on('applink:consent-request', (request) => {
+  voicegoat.on('applink:consent-request', (request) => {
     pendingConsentId = request.id;
     $('#cs-title').textContent = request.message;
     $('#cs-body').textContent = request.detail;
@@ -2237,7 +2237,7 @@
     trapFocus($('#consent'));
   });
 
-  cue.on('whisper:download-progress', (progress) => {
+  voicegoat.on('whisper:download-progress', (progress) => {
     if (!whisperOverview) return;
     const model = whisperOverview.models.find((candidate) => candidate.id === progress.modelId);
     if (!model) return;
@@ -2249,14 +2249,14 @@
       $('#whisper-progress-label').textContent = `${progress.percent}%`;
     }
   });
-  cue.on('whisper:models-changed', () => refreshWhisperModels());
+  voicegoat.on('whisper:models-changed', () => refreshWhisperModels());
 
   // ======================================================================
   //  Boot
   // ======================================================================
   (async function boot() {
-    settings = await cue.settingsGet();
-    platformInfo = await cue.platformInfo();
+    settings = await voicegoat.settingsGet();
+    platformInfo = await voicegoat.platformInfo();
 
     // The system locale comes from the main process: navigator.language inside
     // Electron does not always match what the OS is set to.
@@ -2277,7 +2277,7 @@
 
     await refreshLocal();
 
-    const state = await cue.captureState();
+    const state = await voicegoat.captureState();
     capturing = !!state.active;
     paintListenButton();
     paintListenBar();
